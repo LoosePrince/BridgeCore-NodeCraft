@@ -55,7 +55,7 @@ if not exist "dist" mkdir dist
 
 echo.
 echo [1/9] 编译日志模块...
-%JAVAC% -d build -cp "%CLASSPATH%" src\com\bridgecore\agent\logging\*.java
+%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\logging\*.java
 if errorlevel 1 (
     echo [错误] 日志模块编译失败
     exit /b 1

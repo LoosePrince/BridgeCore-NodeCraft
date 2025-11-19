@@ -55,49 +55,56 @@ mkdir -p build
 mkdir -p dist
 
 echo ""
-echo "[1/8] 编译工具模块..."
-$JAVAC -d build -cp "$CLASSPATH" src/com/bridgecore/agent/utils/*.java
+echo "[1/9] 编译日志模块..."
+$JAVAC -d build -cp "$CLASSPATH:build" src/com/bridgecore/agent/logging/*.java
+if [ $? -ne 0 ]; then
+    echo "[错误] 日志模块编译失败"
+    exit 1
+fi
+
+echo "[2/9] 编译工具模块..."
+$JAVAC -d build -cp "$CLASSPATH:build" src/com/bridgecore/agent/utils/*.java
 if [ $? -ne 0 ]; then
     echo "[错误] 工具模块编译失败"
     exit 1
 fi
 
-echo "[2/8] 编译注入模块 (MappingResolver)..."
+echo "[3/9] 编译注入模块 (MappingResolver)..."
 $JAVAC -d build -cp "$CLASSPATH:build" src/com/bridgecore/agent/injection/MappingResolver.java
 if [ $? -ne 0 ]; then
     echo "[错误] MappingResolver 编译失败"
     exit 1
 fi
 
-echo "[3/8] 编译拦截模块..."
+echo "[4/9] 编译拦截模块..."
 $JAVAC -d build -cp "$CLASSPATH:build" src/com/bridgecore/agent/intercept/*.java
 if [ $? -ne 0 ]; then
     echo "[错误] 拦截模块编译失败"
     exit 1
 fi
 
-echo "[4/8] 编译注入模块 (其余)..."
+echo "[5/9] 编译注入模块 (其余)..."
 $JAVAC -d build -cp "$CLASSPATH:build" src/com/bridgecore/agent/injection/*.java
 if [ $? -ne 0 ]; then
     echo "[错误] 注入模块编译失败"
     exit 1
 fi
 
-echo "[5/8] 编译 ChatInterceptorTransformer.java..."
+echo "[6/9] 编译 ChatInterceptorTransformer.java..."
 $JAVAC -d build -cp "$CLASSPATH:build" src/ChatInterceptorTransformer.java
 if [ $? -ne 0 ]; then
     echo "[错误] ChatInterceptorTransformer 编译失败"
     exit 1
 fi
 
-echo "[6/8] 编译 BCNCAgent.java..."
+echo "[7/9] 编译 BCNCAgent.java..."
 $JAVAC -d build -cp "$CLASSPATH:build" src/BCNCAgent.java
 if [ $? -ne 0 ]; then
     echo "[错误] BCNCAgent 编译失败"
     exit 1
 fi
 
-echo "[7/8] 编译 BCNCAttacher.java..."
+echo "[8/9] 编译 BCNCAttacher.java..."
 $JAVAC -d build -cp "$JAVA_HOME/lib/tools.jar" src/BCNCAttacher.java
 if [ $? -ne 0 ]; then
     echo "[错误] BCNCAttacher 编译失败"
@@ -105,7 +112,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # 解压 ASM 库到 build 目录
-echo "[8/8] 合并 ASM 库..."
+echo "[9/9] 合并 ASM 库..."
 cd build
 $JAR -xf "$ASM_JAR"
 $JAR -xf "$ASM_COMMONS_JAR"
@@ -117,7 +124,8 @@ cd ..
 # 打包 Agent JAR (包含 ASM 和 Transformer)
 rm -f dist/bcnc-agent.jar dist/bcnc-attacher.jar
 
-echo "[7/8] 打包 bcnc-agent.jar (包含 ASM)..."
+# 打包 Agent JAR (包含 ASM 和 Transformer)
+echo "打包 bcnc-agent.jar (包含 ASM)..."
 cd build
 $JAR --create --file ../dist/bcnc-agent.jar --manifest ../src/MANIFEST.MF com/bridgecore/agent/ org/objectweb/asm/
 if [ $? -ne 0 ]; then
@@ -128,7 +136,7 @@ fi
 cd ..
 
 # 打包 Attacher JAR
-echo "[8/8] 打包 bcnc-attacher.jar..."
+echo "打包 bcnc-attacher.jar..."
 cd build
 $JAR --create --file ../dist/bcnc-attacher.jar --main-class com.bridgecore.agent.BCNCAttacher com/bridgecore/agent/BCNCAttacher.class
 if [ $? -ne 0 ]; then
