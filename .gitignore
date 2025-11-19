@@ -1,0 +1,46 @@
+# eclipse
+
+*.launch
+
+# idea
+
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# vscode
+
+.settings/
+.vscode/
+bin/
+.classpath
+.project
+.kiro/
+.cursor/
+
+# macos
+
+*.DS_Store
+
+# Minecraft
+
+/server/
+/plugins/
+/config/
+/logs/
+.bcnc-cache/
+
+# Node
+# Node.js 相关文件在 Script 目录中
+Script/node_modules
+Script/package-lock.json
+
+# tmp
+*.tmp
+temp
+tmp-cfr
+tools
+*.jar
+*.txt
+config.yml

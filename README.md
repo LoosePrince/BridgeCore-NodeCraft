@@ -1,0 +1,72 @@
+# BridgeCore-NodeCraft
+
+> 桥接核心 - Node技艺
+
+使用 Node.js 运行和管理 Minecraft 服务器，并通过 Java Agent 和 ASM 注入到服务器进程中实现更深入的功能
+
+## 特别说明
+
+本项目为构想验证性项目，请勿用于生产级环境。
+
+## 安装
+
+1. 确保已安装 Node.js (推荐 v18 或更高版本)
+
+2. 进入 Script 目录并安装依赖：
+```bash
+cd Script
+npm install
+cd ..
+```
+
+## 使用方法
+
+### 配置
+
+复制 config.yml.example 并重命名为 config.yml，根据需要修改配置。
+
+```bash
+cp config.yml.example config.yml
+```
+
+### 启动服务器
+
+**方式一：使用启动脚本（推荐）**
+```bash
+# Windows
+start.bat
+
+# Linux/Mac
+./start.sh
+```
+
+**方式二：手动进入 Script 目录**
+```bash
+cd Script
+npm start
+```
+
+### 停止服务器
+
+- 在交互式命令行中输入 `!stop` 或 `!exit`
+- 或按 `Ctrl+C` 发送中断信号
+
+## 支持列表
+
+### 服务端
+
+- vanilla(原版)
+- Fabric
+- Forge
+
+### 游戏版本
+
+> 仅在以下版本中测试，理论可用其他版本
+
+- 1.21.10
+- 1.21
+- 1.16.5
+
+## 许可证
+
+Apache License

@@ -1,0 +1,68 @@
+# BridgeCore-NodeCraft 配置文件
+
+# 服务器配置
+server:
+  # 服务器目录路径（相对于项目根目录或绝对路径）
+  directory: "./server"
+  
+  # 服务器启动命令
+  # 示例
+  # "C:\Program Files\Java\jdk-21\bin\java.exe" -Xmx16G -jar server.jar nogui
+  # "C:\Windows\System32\cmd.exe" /c run.bat
+  startCommand: ''
+  
+  # 日志解析 handler
+  # 可选值: "vanilla", "forge"
+  handler: "vanilla"
+
+# 日志配置
+logging:
+  # 是否在控制台显示服务器输出
+  consoleOutput: true
+  
+  # 是否保存日志到文件
+  saveToFile: true
+  
+  # 日志文件路径（相对于项目根目录）
+  logFile: "./logs/server.log"
+  
+  # 日志级别: "debug", "info", "warn", "error"
+  level: "info"
+  
+  # 是否显示时间戳
+  showTimestamp: true
+  
+  # 是否显示颜色输出
+  coloredOutput: true
+
+# 自动重启配置
+autoRestart:
+  # 是否启用自动重启
+  enabled: false
+  
+  # 服务器崩溃后等待多少秒再重启（秒）
+  delay: 10
+  
+  # 最大重启次数（0 表示无限制）
+  maxRestarts: 3
+
+# 命令配置
+commands:
+  # 是否启用交互式命令输入
+  interactive: true
+  
+  # 命令前缀（用于区分系统命令和服务器命令）
+  prefix: "!"
+
+# Agent 注入配置
+agent:
+  # 是否在服务器启动完成后自动注入 Agent
+  autoInject: true
+  
+  # 通信端口
+  port: 25575
+
+# RCON 配置（自动读取 server.properties）
+rcon:
+  enabled: true
+
