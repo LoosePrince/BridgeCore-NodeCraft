@@ -71,6 +71,7 @@ export default {
 | `rcon` | `RconAPI | null` | RCON 封装，需要配置启用 |
 | `events` | `EventsAPI | null` | 结构化事件接口 |
 | `messenger` | `Messenger` | 文本组件消息工具 |
+| `permissions` | `PermissionAPI` | 权限管理 API |
 
 ### 2.1 命令注册
 
@@ -78,6 +79,8 @@ export default {
 ctx.registerCommand(['plugin', 'reload'], {
   description: '重载插件',
   aliases: ['plr'],
+  permissionLevel: 3,  // 可选：需要 3 级或以上权限
+  denyMessage: '你没有权限执行此命令',  // 可选：权限不足时的提示消息
   handler: async (args, context) => { ... }
 });
 
@@ -89,6 +92,8 @@ ctx.unregisterCommand(['plugin', 'reload']);
   - `context.player`：玩家名（若来源为玩家）
   - `context.reply(message, options)`：统一回复
   - `context.messenger`：同 `ctx.messenger`
+- `permissionLevel`：可选，指定命令所需的最低权限级别（1-4）
+- `denyMessage`：可选，权限不足时显示的消息（默认："你没有权限执行此命令"）
 
 ### 2.2 服务器交互
 
@@ -101,7 +106,31 @@ if (ctx.serverManager.isRunning()) {
 - `ctx.sendServerCommand` 会直接写入服务器标准输入。
 - 需确保服务器已启动。
 
-### 2.3 插件管理 API
+### 2.3 权限管理
+
+```javascript
+// 检查玩家权限
+const hasPermission = ctx.permissions.hasPermission('PlayerName', 3);
+
+// 获取玩家权限级别
+const level = ctx.permissions.getLevel('PlayerName');
+
+// 设置玩家权限级别
+ctx.permissions.setLevel('PlayerName', 3);
+
+// 获取默认权限级别
+const defaultLevel = ctx.permissions.getDefaultLevel();
+
+// 列出所有玩家权限
+const players = ctx.permissions.list();
+```
+
+权限级别范围：1-4（数字越大权限越高）
+- CLI 默认拥有 4 级权限
+- 游戏中玩家默认 1 级权限
+- 可在 `config/permissions.yml` 中配置
+
+### 2.4 插件管理 API
 
 | 方法 | 描述 |
 | --- | --- |
@@ -114,7 +143,7 @@ if (ctx.serverManager.isRunning()) {
 
 > 操作其他插件需谨慎，避免循环依赖或频繁重载。
 
-### 2.4 RCON API
+### 2.5 RCON API
 
 ```javascript
 if (ctx.rcon?.isEnabled()) {
@@ -127,7 +156,7 @@ if (ctx.rcon?.isEnabled()) {
 - `isEnabled()` 与 `isConnected()` 可判断状态。
 - 通过 `getSettings()` 查询 host/port（只读）。
 
-### 2.5 消息发送
+### 2.6 消息发送
 
 ```javascript
 await context.reply({ text: '操作成功', color: 'green' });
@@ -221,7 +250,95 @@ ctx.events.unregisterLineProcessor(processorId);
 10. **插件自管理**
     - 使用 `ctx.plugins` 操作其他插件前需考虑依赖、并发与安全。
 
-## 5. 综合示例：服务器监控插件
+## 5. 权限系统示例
+
+### 5.1 权限检查示例
+
+```javascript
+export default {
+  meta: {
+    id: 'permission-example',
+    name: '权限示例插件',
+    version: '1.0.0'
+  },
+  async setup(ctx) {
+    // 注册需要 3 级权限的命令
+    ctx.registerCommand('admin', {
+      permissionLevel: 3,
+      denyMessage: '§c你需要管理员权限才能使用此命令',
+      handler: async (args, context) => {
+        await context.reply({ text: '管理员命令执行成功', color: 'green' });
+        return true;
+      }
+    });
+
+    // 在事件处理中检查权限
+    ctx.eventBus.on('server:chat', async ({ player, message }) => {
+      if (message.startsWith('!test')) {
+        const hasPermission = ctx.permissions.hasPermission(player, 2);
+        if (hasPermission) {
+          await ctx.messenger.sendToPlayer(player, [
+            { text: '[测试] ', color: 'gold' },
+            { text: '你有权限执行此操作', color: 'green' }
+          ]);
+        } else {
+          await ctx.messenger.sendToPlayer(player, [
+            { text: '[测试] ', color: 'gold' },
+            { text: '权限不足', color: 'red' }
+          ]);
+        }
+      }
+    });
+  }
+};
+```
+
+### 5.2 动态权限管理示例
+
+```javascript
+export default {
+  meta: {
+    id: 'permission-manager',
+    name: '权限管理插件',
+    version: '1.0.0'
+  },
+  async setup(ctx) {
+    // 注册权限管理命令（需要 4 级权限）
+    ctx.registerCommand(['perm', 'plugin'], {
+      permissionLevel: 4,
+      handler: async (args, context) => {
+        const [action, player, level] = args;
+        
+        if (action === 'set' && player && level) {
+          const newLevel = parseInt(level, 10);
+          if (newLevel >= 1 && newLevel <= 4) {
+            ctx.permissions.setLevel(player, newLevel);
+            await context.reply({
+              text: `已将 ${player} 的权限设置为 ${newLevel} 级`,
+              color: 'green'
+            });
+          } else {
+            await context.reply({
+              text: '权限级别必须在 1-4 之间',
+              color: 'red'
+            });
+          }
+        } else if (action === 'get' && player) {
+          const level = ctx.permissions.getLevel(player);
+          await context.reply({
+            text: `${player} 的权限级别: ${level}`,
+            color: 'aqua'
+          });
+        }
+        
+        return true;
+      }
+    });
+  }
+};
+```
+
+## 6. 综合示例：服务器监控插件
 
 ```javascript
 export const meta = {
@@ -272,7 +389,7 @@ export function teardown(ctx) {
 }
 ```
 
-## 6. 最佳实践速记
+## 7. 最佳实践速记
 
 - **结构化输出**：统一使用 JSON 文本组件。
 - **事件优先**：优先通过事件驱动逻辑，减少轮询。

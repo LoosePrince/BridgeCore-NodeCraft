@@ -21,6 +21,10 @@
 | 统一拦截 | Agent 负责底层字节码注入，Node.js 负责注册、卸载、执行拦截规则 |
 | 事件驱动 | `server:ready`、`server:chat` 等事件与自动注入机制联动 |
 | 插件生态 | Node.js 层暴露完整插件 API，支持命令、事件、消息等扩展 |
+| 权限系统 | 4 级权限管理（1-4），支持玩家权限配置和命令权限控制 |
+| 多服务器支持 | 支持 Vanilla、Forge、Paper 等服务器类型，自动适配日志格式 |
+| 编码支持 | 支持 UTF-8 和 GBK 编码，解决 Windows 中文乱码问题 |
+| 日志管理 | 动态日志级别控制，Agent 日志自动过滤和重定向 |
 
 ## 3. 体系架构
 
@@ -162,6 +166,5 @@ interceptor.registerRule({
 
 ---
 
-- 自动注入日志样例与更多命令示例见 `AUTO_INJECT_EXAMPLE.md` 与 `AGENT_INJECTION.md` 原文。
 - 技术细节（命令参数、配置、协议、故障排除）请参考《BCNC 技术性说明》。
 

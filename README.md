@@ -63,6 +63,14 @@ npm start
 - 1.21 - Fabric
 - 1.16.5
 
+## 文档
+
+详细的文档和 API 参考请查看 `docs/` 目录：
+
+- **[BCNC 基础说明与架构概览](docs/BCNC_FOUNDATION.md)** - 系统定位、关键特性、架构概览和使用场景
+- **[BCNC 技术性说明](docs/BCNC_TECHNICAL.md)** - Agent 注入、配置、通信协议、权限系统和故障排除
+- **[BCNC 插件与 API 参考](docs/BCNC_PLUGIN_REFERENCE.md)** - 插件开发指南、上下文 API、事件系统和编写规范
+
 ## 许可证
 
 Apache License
