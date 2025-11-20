@@ -1,6 +1,7 @@
 import { AgentInjector } from './injector.js';
 import { AgentCommunicator } from './communicator.js';
 import { AgentInterceptor } from './interceptor.js';
+import { MappingService } from './mapping-service.js';
 import { resolveAttachableJavaPid } from '../utils/process-utils.js';
 
 /**
@@ -20,6 +21,7 @@ export class AgentManager {
     this.listenersReady = false;
     this.pendingLogLevel = this.logger?.getLevel?.() || null;
     this.onAgentReady = null; // 回调函数，在 Agent ready 时调用
+    this.mappingService = new MappingService(logger);
   }
 
   /**
@@ -121,6 +123,10 @@ export class AgentManager {
       this.logger.info(`${data}`);
     });
 
+    this.communicator.on('mappingRequest', (payload) => {
+      this.handleMappingRequest(payload);
+    });
+
   }
 
   /**
@@ -219,6 +225,40 @@ export class AgentManager {
       serverPid: this.serverManager?.getProcessId?.() ?? null,
       paths: this.injector.getAgentPaths()
     };
+  }
+
+  async handleMappingRequest(payload) {
+    if (!payload) {
+      this.communicator?.sendMessage?.('MAPPING_FAILED', '映射请求为空');
+      return;
+    }
+
+    let request;
+    try {
+      request = JSON.parse(payload);
+    } catch (err) {
+      const message = `解析映射请求失败: ${err.message}`;
+      this.logger?.error?.(message);
+      this.communicator?.sendMessage?.('MAPPING_FAILED', message);
+      return;
+    }
+
+    const version = request?.version;
+    const outputPath = request?.path;
+
+    try {
+      const result = await this.mappingService.ensureMapping(version, outputPath);
+      const response = JSON.stringify({
+        version,
+        path: outputPath,
+        status: result.status
+      });
+      this.communicator?.sendMessage?.('MAPPING_READY', response);
+    } catch (err) {
+      const message = err?.message || '未知错误';
+      this.logger?.error?.(`映射表下载失败: ${message}`);
+      this.communicator?.sendMessage?.('MAPPING_FAILED', message);
+    }
   }
 
   resolveTargetPid(pid) {

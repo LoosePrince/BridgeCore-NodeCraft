@@ -68,8 +68,8 @@ export default {
 | `commandRegistry` | `CommandRegistry` | 低级命令树操作 |
 | `commandHandler` | `CommandHandler` | 可直接调用核心命令 |
 | `plugins` | `PluginAPI` | 管理其他插件 |
-| `rcon` | `RconAPI | null` | RCON 封装，需要配置启用 |
-| `events` | `EventsAPI | null` | 结构化事件接口 |
+| `rcon` | `RconAPI` | RCON 封装，需要配置启用 |
+| `events` | `EventsAPI` | 结构化事件接口 |
 | `messenger` | `Messenger` | 文本组件消息工具 |
 | `permissions` | `PermissionAPI` | 权限管理 API |
 | `configHelper` | `ConfigHelperAPI` | 快捷配置接口（读写 YAML/JSON） |

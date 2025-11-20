@@ -155,6 +155,10 @@ export class AgentCommunicator extends EventEmitter {
           this.emit('chatIntercepted', { ruleId, message, playerName });
           break;
 
+        case 'REQUEST_MAPPING':
+          this.emit('mappingRequest', data.data);
+          break;
+
         case 'RULE_REGISTERED':
           this.emit('ruleRegistered', data.data);
           break;

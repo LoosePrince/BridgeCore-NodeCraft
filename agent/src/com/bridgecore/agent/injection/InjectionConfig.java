@@ -3,8 +3,6 @@ package com.bridgecore.agent.injection;
 import com.bridgecore.agent.intercept.ChatInterceptModule;
 import com.bridgecore.agent.intercept.PlayerInfoExtractor;
 import com.bridgecore.agent.logging.AgentLogger;
-import com.bridgecore.agent.utils.MappingDownloader;
-import com.bridgecore.agent.utils.VersionDetector;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -25,25 +23,14 @@ public class InjectionConfig {
         
         // 尝试加载映射文件
         java.io.File mappingFile = new java.io.File("server.txt"); // 默认查找当前目录下的 server.txt
-        
-        // 如果是原版服务端且没有映射文件，尝试自动下载
-        if (!mappingFile.exists() && serverType == ServerType.VANILLA) {
-            String version = VersionDetector.detectVersion();
-            if (version != null) {
-                AgentLogger.info("开始下载" + version + "的映射表");
-                MappingDownloader.downloadMappings(version, mappingFile);
-            } else {
-                AgentLogger.warn("未能检测到 Minecraft 版本，跳过自动下载映射表");
-                AgentLogger.warn("请手动下载映射表并放置在服务器目录下，文件名为 server.txt");
-            }
-        }
-
         if (mappingFile.exists()) {
             this.mappingResolver.loadMapping(mappingFile);
             resolveMappedClasses();
             
             // 配置 PlayerInfoExtractor 使用映射解析器
             ChatInterceptModule.setPlayerInfoExtractor(new PlayerInfoExtractor(this.mappingResolver));
+        } else {
+            AgentLogger.warn("未找到 server.txt 映射文件，某些原版服务端可能无法完成注入");
         }
     }
 

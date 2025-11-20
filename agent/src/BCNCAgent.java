@@ -6,6 +6,7 @@ import com.bridgecore.agent.intercept.InterceptRule;
 import com.bridgecore.agent.intercept.RuleRegistry;
 import com.bridgecore.agent.injection.*;
 import com.bridgecore.agent.logging.AgentLogger;
+import com.bridgecore.agent.utils.VersionDetector;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -35,6 +36,12 @@ public class BCNCAgent {
     private static BufferedReader in;
     private static volatile boolean running = true;
     private static Thread communicationThread;
+    private static final Object COMMUNICATION_LOCK = new Object();
+    private static volatile boolean communicationEstablished = false;
+    private static final Object MAPPING_LOCK = new Object();
+    private static volatile boolean mappingReady = false;
+    private static volatile boolean mappingFailed = false;
+    private static volatile String mappingStatusMessage = "";
     
     private static final RuleRegistry RULE_REGISTRY = ChatInterceptModule.getRuleRegistry();
     private static InterceptEventDispatcher interceptDispatcher;
@@ -94,13 +101,21 @@ public class BCNCAgent {
         // 注册 MethodHandle
         registerMethodHandle();
         
-        // 安装聊天拦截器
-        AgentLogger.debug("正在安装聊天消息拦截器...");
-        installChatInterceptor();
+        // 检测服务端类型
+        AgentLogger.debug("正在检测服务端类型...");
+        ServerType serverType = ServerType.detect(instrumentation);
+        AgentLogger.info("检测到服务端类型: " + serverType.getDisplayName());
         
         // 启动通信线程
         AgentLogger.info("正在启动通信服务 (端口: " + port + ")...");
         startCommunication(port, inst);
+        
+        // 准备映射文件
+        prepareMappings(serverType);
+        
+        // 安装聊天拦截器
+        AgentLogger.debug("正在安装聊天消息拦截器...");
+        installChatInterceptor(serverType);
         
         AgentLogger.info("Agent 初始化完成");
     }
@@ -135,14 +150,8 @@ public class BCNCAgent {
     /**
      * 安装聊天拦截器
      */
-    private static void installChatInterceptor() {
+    private static void installChatInterceptor(ServerType serverType) {
         try {
-            AgentLogger.debug("正在检测服务端类型...");
-            
-            // 检测服务端类型
-            ServerType serverType = ServerType.detect(instrumentation);
-            AgentLogger.info("检测到服务端类型: " + serverType.getDisplayName());
-            
             // 获取注入配置
             InjectionConfig config = InjectionConfig.getDefaultConfig(serverType);
             
@@ -159,7 +168,7 @@ public class BCNCAgent {
             List<Class<?>> targetClasses = classLocator.locateTargetClasses();
             
             if (targetClasses.isEmpty()) {
-                AgentLogger.warn("未找到目标处理器类");
+                AgentLogger.warn("未找到目标处理器类（忽略）");
                 AgentLogger.debug("目标类名: " + config.getTargetClassNames());
                 AgentLogger.debug("注意: 如果未找到目标类，它们可能在玩家连接时才会加载。Transformer 已注册，将在类首次加载时拦截。");
                 return;
@@ -194,6 +203,90 @@ public class BCNCAgent {
             
         } catch (Exception e) {
             AgentLogger.error("安装拦截器失败: " + e.getMessage(), e);
+        }
+    }
+    
+    private static void prepareMappings(ServerType serverType) {
+        File mappingFile = new File("server.txt");
+        if (mappingFile.exists()) {
+            AgentLogger.debug("检测到现有映射文件: " + mappingFile.getAbsolutePath());
+            return;
+        }
+        
+        if (serverType != ServerType.VANILLA) {
+            AgentLogger.debug("当前服务端类型为 " + serverType.getDisplayName() + "，无需自动下载映射表");
+            return;
+        }
+        
+        String version = VersionDetector.detectVersion();
+        if (version == null) {
+            AgentLogger.warn("未能检测到 Minecraft 版本，无法请求映射表下载");
+            AgentLogger.warn("请手动将 server.txt 放置在服务器根目录");
+            return;
+        }
+        
+        if (requestMappingsFromBCNC(version, mappingFile) && mappingFile.exists()) {
+            AgentLogger.info("映射表已准备就绪: " + mappingFile.getAbsolutePath());
+        } else if (!mappingFile.exists()) {
+            AgentLogger.warn("BCNC 未能提供映射表，将尝试在无映射文件的情况下继续");
+        }
+    }
+    
+    private static boolean requestMappingsFromBCNC(String version, File mappingFile) {
+        if (!waitForCommunicationReady(15000)) {
+            AgentLogger.warn("通信尚未就绪，无法请求 BCNC 下载映射表");
+            return false;
+        }
+        
+        synchronized (MAPPING_LOCK) {
+            mappingReady = false;
+            mappingFailed = false;
+            mappingStatusMessage = "";
+        }
+        
+        AgentLogger.info("请求 BCNC 下载映射表: 版本 " + version);
+        String payload = "{\"version\":\"" + escapeJson(version) + "\",\"path\":\"" 
+                + escapeJson(mappingFile.getAbsolutePath()) + "\"}";
+        sendMessage("REQUEST_MAPPING", payload);
+        
+        synchronized (MAPPING_LOCK) {
+            while (!mappingReady && !mappingFailed) {
+                try {
+                    MAPPING_LOCK.wait();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            
+            if (mappingReady) {
+                AgentLogger.debug("收到 BCNC 映射表完成通知: " + mappingStatusMessage);
+                return true;
+            }
+            
+            if (mappingFailed) {
+                AgentLogger.warn("BCNC 下载映射表失败: " + mappingStatusMessage);
+            }
+            return false;
+        }
+    }
+    
+    private static boolean waitForCommunicationReady(long timeoutMillis) {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        synchronized (COMMUNICATION_LOCK) {
+            while (!communicationEstablished) {
+                long remaining = deadline - System.currentTimeMillis();
+                if (remaining <= 0) {
+                    return false;
+                }
+                try {
+                    COMMUNICATION_LOCK.wait(Math.min(remaining, 500));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            return true;
         }
     }
     
@@ -242,15 +335,11 @@ public class BCNCAgent {
                 return;
             }
 
-            JarFile jarForBootstrap = new JarFile(jarFile);
-            inst.appendToBootstrapClassLoaderSearch(jarForBootstrap);
-            AgentLogger.debug("已将 Agent JAR 加入 Bootstrap ClassLoader");
-
             JarFile jarForSystem = new JarFile(jarFile);
             inst.appendToSystemClassLoaderSearch(jarForSystem);
-            AgentLogger.debug("已将 Agent JAR 加入 System ClassLoader");
+            AgentLogger.debug("已将 Agent JAR 加入 System ClassLoader 搜索路径");
         } catch (Exception e) {
-            AgentLogger.warn("无法将 Agent JAR 添加到引导类加载器: " + e.getMessage());
+            AgentLogger.warn("无法将 Agent JAR 添加到 System ClassLoader: " + e.getMessage());
         }
     }
     
@@ -265,6 +354,11 @@ public class BCNCAgent {
                 socket = new Socket("127.0.0.1", port);
                 out = new PrintWriter(socket.getOutputStream(), true);
                 in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                
+                synchronized (COMMUNICATION_LOCK) {
+                    communicationEstablished = true;
+                    COMMUNICATION_LOCK.notifyAll();
+                }
                 
                 AgentLogger.info("已连接到 Node.js 服务器");
                 
@@ -359,12 +453,38 @@ public class BCNCAgent {
                     sendMessage("LOG_LEVEL_UPDATED", data);
                     break;
                     
+                case "MAPPING_READY":
+                    handleMappingReady(data);
+                    break;
+                    
+                case "MAPPING_FAILED":
+                    handleMappingFailed(data);
+                    break;
+                    
                 default:
                     AgentLogger.debug("未知消息类型: " + type);
             }
             
         } catch (Exception e) {
             AgentLogger.warn("处理消息失败: " + e.getMessage());
+        }
+    }
+    
+    private static void handleMappingReady(String data) {
+        synchronized (MAPPING_LOCK) {
+            mappingReady = true;
+            mappingFailed = false;
+            mappingStatusMessage = data;
+            MAPPING_LOCK.notifyAll();
+        }
+    }
+    
+    private static void handleMappingFailed(String data) {
+        synchronized (MAPPING_LOCK) {
+            mappingReady = false;
+            mappingFailed = true;
+            mappingStatusMessage = data;
+            MAPPING_LOCK.notifyAll();
         }
     }
     
@@ -492,6 +612,10 @@ public class BCNCAgent {
             out = null;
             in = null;
             socket = null;
+            synchronized (COMMUNICATION_LOCK) {
+                communicationEstablished = false;
+                COMMUNICATION_LOCK.notifyAll();
+            }
         } catch (Exception e) {
             // 忽略
         }
