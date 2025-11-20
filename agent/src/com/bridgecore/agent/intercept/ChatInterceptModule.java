@@ -31,9 +31,6 @@ public final class ChatInterceptModule {
     }
 
     public static boolean handleChat(String message, Object handler) {
-        // 调试日志
-        // System.out.println("[BCNC Agent] handleChat called: " + message);
-
         if (message == null || dispatcher == null) {
             return false;
         }

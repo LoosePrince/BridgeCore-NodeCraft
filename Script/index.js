@@ -107,6 +107,14 @@ async function main() {
     messenger
   });
 
+  // 监听 Agent 连接，自动注册默认规则（无论是自动注入还是手动注入）
+  agentManager.onAgentReady = () => {
+    // 延迟一小段时间确保拦截器已初始化
+    setTimeout(() => {
+      setupDefaultInterceptRules({ agentManager, config, logger, commandHandler, messenger });
+    }, 100);
+  };
+
   // 加载插件（在 Java 检查之前）
   await pluginManager.loadPlugins(pluginScan.entries);
 

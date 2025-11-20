@@ -159,8 +159,9 @@ public class BCNCAgent {
             List<Class<?>> targetClasses = classLocator.locateTargetClasses();
             
             if (targetClasses.isEmpty()) {
-                AgentLogger.warn("未找到聊天处理类");
+                AgentLogger.warn("未找到目标处理器类");
                 AgentLogger.debug("目标类名: " + config.getTargetClassNames());
+                AgentLogger.debug("注意: 如果未找到目标类，它们可能在玩家连接时才会加载。Transformer 已注册，将在类首次加载时拦截。");
                 return;
             }
             
@@ -186,7 +187,7 @@ public class BCNCAgent {
             }
             
             if (transformedCount > 0) {
-                AgentLogger.info("转换了 " + transformedCount + " 个类，拦截器已就绪，等待 Node.js 注册规则");
+                AgentLogger.debug("转换了 " + transformedCount + " 个类，拦截器已就绪");
             } else {
                 AgentLogger.warn("未找到可修改的聊天处理类");
             }

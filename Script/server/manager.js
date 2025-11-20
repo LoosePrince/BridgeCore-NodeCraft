@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { join } from 'path';
+import iconv from 'iconv-lite';
 
 /**
  * 服务器管理器类
@@ -64,27 +65,57 @@ export class ServerManager {
       shell: false
     });
 
+    // 获取编码配置，默认为 utf-8
+    const encoding = this.config.server?.encoding || 'utf-8';
+    const isGBK = encoding.toLowerCase() === 'gbk';
+
     // 处理标准输出
-        this.serverProcess.stdout.on('data', (data) => {
-          const lines = data.toString().split('\n').filter(line => line.trim());
-          lines.forEach(line => {
+    if (!isGBK && this.serverProcess.stdout.setEncoding) {
+      // UTF-8 可以使用 setEncoding
+      this.serverProcess.stdout.setEncoding('utf8');
+    }
+    this.serverProcess.stdout.on('data', (data) => {
+      // 使用配置的编码解析
+      let text;
+      if (isGBK) {
+        // GBK 使用 iconv-lite 转换
+        const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        text = iconv.decode(buffer, 'gbk');
+      } else {
+        text = typeof data === 'string' ? data : data.toString('utf8');
+      }
+      const lines = text.split('\n').filter(line => line.trim());
+      lines.forEach(line => {
         const handled = this.outputProcessor?.handleLine?.(line, 'stdout');
         if (!handled) {
-            this.logger.serverOutput(line);
+          this.logger.serverOutput(line);
         }
-          });
-        });
+      });
+    });
 
     // 处理标准错误输出
-        this.serverProcess.stderr.on('data', (data) => {
-          const lines = data.toString().split('\n').filter(line => line.trim());
-          lines.forEach(line => {
+    if (!isGBK && this.serverProcess.stderr.setEncoding) {
+      // UTF-8 可以使用 setEncoding
+      this.serverProcess.stderr.setEncoding('utf8');
+    }
+    this.serverProcess.stderr.on('data', (data) => {
+      // 使用配置的编码解析
+      let text;
+      if (isGBK) {
+        // GBK 使用 iconv-lite 转换
+        const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        text = iconv.decode(buffer, 'gbk');
+      } else {
+        text = typeof data === 'string' ? data : data.toString('utf8');
+      }
+      const lines = text.split('\n').filter(line => line.trim());
+      lines.forEach(line => {
         const handled = this.outputProcessor?.handleLine?.(line, 'stderr');
         if (!handled) {
-            this.logger.serverOutput(line);
+          this.logger.serverOutput(line);
         }
-          });
-        });
+      });
+    });
 
     // 处理进程退出
     this.serverProcess.on('exit', (code, signal) => {

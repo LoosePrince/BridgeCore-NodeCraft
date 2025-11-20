@@ -113,14 +113,6 @@ public class CodeInjectionStrategy {
             mv.visitJumpInsn(IFEQ, notTrue);
             
             // 拦截成功，直接返回
-            // 添加调试日志
-            mv.visitLdcInsn("[BCNC Agent] 拦截成功，阻止原方法执行: " + methodInfo.getName() + methodInfo.getDescriptor());
-            mv.visitMethodInsn(INVOKESTATIC,
-                    "com/bridgecore/agent/logging/AgentLogger",
-                    "debug",
-                    "(Ljava/lang/String;)V",
-                    false);
-            
             // 根据方法返回类型返回适当的值
             org.objectweb.asm.Type returnType = org.objectweb.asm.Type.getReturnType(methodInfo.getDescriptor());
             if (returnType == org.objectweb.asm.Type.VOID_TYPE) {

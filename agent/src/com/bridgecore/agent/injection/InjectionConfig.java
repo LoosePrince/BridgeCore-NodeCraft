@@ -168,8 +168,13 @@ public class InjectionConfig {
             case PAPER:
             case SPIGOT:
             case BUKKIT:
-                // Paper/Spigot/Bukkit: 使用 Bukkit API
+                // Paper/Spigot/Bukkit: 使用 Bukkit API 和 NMS
+                // Paper 基于原版，所以也包含 ServerGamePacketListenerImpl
+                classNames.add("net.minecraft.server.network.ServerGamePacketListenerImpl");
                 classNames.add("net.minecraft.server.network.ServerPlayNetworkHandler");
+                // CraftBukkit 可能使用版本化的包名，添加模糊匹配
+                classNames.add("*ServerPlayNetworkHandler");
+                classNames.add("*ServerGamePacketListenerImpl");
                 methodSig = new MethodSignature("*", "*Ljava/lang/String;*", 0);
                 break;
 

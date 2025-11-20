@@ -1,9 +1,11 @@
 import { VanillaServerHandler } from './vanilla.js';
 import { ForgeServerHandler } from './forge.js';
+import { PaperServerHandler } from './paper.js';
 
 const handlerRegistry = new Map();
 handlerRegistry.set('vanilla', VanillaServerHandler);
 handlerRegistry.set('forge', ForgeServerHandler);
+handlerRegistry.set('paper', PaperServerHandler);
 
 export function registerServerHandler(name, handlerClass) {
   if (!name || typeof handlerClass !== 'function') {

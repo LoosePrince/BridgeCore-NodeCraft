@@ -11,7 +11,7 @@ export class AgentManager {
   constructor(logger, config, serverManager) {
     this.logger = logger;
     this.config = config;
-    this.injector = new AgentInjector(logger);
+    this.injector = new AgentInjector(logger, config);
     this.communicator = null;
     this.interceptor = null;
     this.communicationPort = config?.agent?.port || 25575;
@@ -19,6 +19,7 @@ export class AgentManager {
     this.serverManager = serverManager;
     this.listenersReady = false;
     this.pendingLogLevel = this.logger?.getLevel?.() || null;
+    this.onAgentReady = null; // 回调函数，在 Agent ready 时调用
   }
 
   /**
@@ -97,6 +98,10 @@ export class AgentManager {
     this.communicator.on('ready', (data) => {
       this.logger.info(`Agent 就绪: ${data}`);
       this.syncAgentLogLevel();
+      // 调用回调函数（如果已设置）
+      if (this.onAgentReady) {
+        this.onAgentReady();
+      }
     });
 
     this.communicator.on('serverInfo', (data) => {

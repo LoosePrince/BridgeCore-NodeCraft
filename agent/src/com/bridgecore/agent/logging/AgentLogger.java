@@ -1,6 +1,9 @@
 package com.bridgecore.agent.logging;
 
 import java.io.PrintStream;
+import java.io.OutputStreamWriter;
+import java.io.BufferedWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -115,7 +118,16 @@ public final class AgentLogger {
             return;
         }
         PrintStream stream = level.ordinal() >= LogLevel.WARN.ordinal() ? System.err : System.out;
-        stream.println("[BCNC Agent][" + level.name() + "] " + message);
+        try {
+            // 确保使用 UTF-8 编码输出
+            // 直接写入 UTF-8 字节，避免受 System.out 编码设置影响
+            byte[] bytes = ("[BCNC Agent][" + level.name() + "] " + message + "\n").getBytes(StandardCharsets.UTF_8);
+            stream.write(bytes);
+            stream.flush();
+        } catch (java.io.IOException e) {
+            // 如果直接写入字节失败，回退到 println（可能使用系统编码）
+            stream.println("[BCNC Agent][" + level.name() + "] " + message);
+        }
         if (throwable != null) {
             throwable.printStackTrace(stream);
         }

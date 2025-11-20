@@ -33,14 +33,39 @@ public class ChatInterceptorTransformer implements ClassFileTransformer {
 
         // 将内部类名转换为标准格式
         String internalName = className.replace('.', '/');
+        String classNameWithDots = className.replace('/', '.');
         
-        // 检查是否匹配目标类
+        // 检查是否匹配目标类（支持通配符）
         boolean matches = false;
         for (String targetName : config.getTargetClassNames()) {
             String targetInternal = targetName.replace('.', '/');
-            if (className.equals(targetName) || internalName.equals(targetInternal)) {
+            
+            // 精确匹配
+            if (className.equals(targetName) || internalName.equals(targetInternal) || 
+                classNameWithDots.equals(targetName)) {
                 matches = true;
+                AgentLogger.debug("[Transformer] 匹配类: " + classNameWithDots);
                 break;
+            }
+            
+            // 通配符匹配
+            if (targetName.contains("*")) {
+                String pattern = targetName.replace("*", ".*").replace(".", "\\.");
+                if (classNameWithDots.matches(pattern) || className.matches(pattern)) {
+                    matches = true;
+                    AgentLogger.debug("[Transformer] 匹配类: " + classNameWithDots);
+                    break;
+                }
+            }
+            
+            // 后缀匹配（如 *ServerPlayNetworkHandler）
+            if (targetName.startsWith("*")) {
+                String suffix = targetName.substring(1);
+                if (classNameWithDots.endsWith(suffix) || className.endsWith(suffix)) {
+                    matches = true;
+                    AgentLogger.debug("[Transformer] 匹配类: " + classNameWithDots);
+                    break;
+                }
             }
         }
 
@@ -82,9 +107,8 @@ public class ChatInterceptorTransformer implements ClassFileTransformer {
             // 使用 MethodLocator 检查方法是否匹配
             boolean matches = methodLocator.matches(name, descriptor);
             
-            // 调试日志：打印所有访问的方法
             if (matches) {
-                AgentLogger.debug("[Transformer] 扫描方法: " + name + descriptor + " (匹配)");
+                AgentLogger.debug("[Transformer] 匹配到方法: " + name + descriptor);
             }
 
             if (!matches) {

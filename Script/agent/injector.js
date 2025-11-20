@@ -3,6 +3,7 @@ import { existsSync, chmodSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { platform } from 'os';
+import iconv from 'iconv-lite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -13,8 +14,9 @@ const projectRoot = dirname(dirname(__dirname));
  * 负责编译和注入 Java Agent
  */
 export class AgentInjector {
-  constructor(logger) {
+  constructor(logger, config = null) {
     this.logger = logger;
+    this.config = config;
     this.agentDir = join(projectRoot, 'agent');
     this.distDir = join(this.agentDir, 'dist');
     this.agentJar = join(this.distDir, 'bcnc-agent.jar');
@@ -70,8 +72,23 @@ export class AgentInjector {
       let stdout = '';
       let stderr = '';
 
+      // 获取编码配置，默认为 utf-8
+      const encoding = this.config?.server?.encoding || 'utf-8';
+      const isGBK = encoding.toLowerCase() === 'gbk';
+
+      // 设置编码（仅 UTF-8 支持 setEncoding）
+      if (!isGBK && buildProcess.stdout.setEncoding) {
+        buildProcess.stdout.setEncoding('utf8');
+      }
       buildProcess.stdout.on('data', (data) => {
-        const output = data.toString();
+        let text;
+        if (isGBK) {
+          const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          text = iconv.decode(buffer, 'gbk');
+        } else {
+          text = typeof data === 'string' ? data : data.toString('utf8');
+        }
+        const output = text;
         stdout += output;
         // 实时显示编译输出
         output.split('\n').forEach(line => {
@@ -81,8 +98,19 @@ export class AgentInjector {
         });
       });
 
+      // 设置编码（仅 UTF-8 支持 setEncoding）
+      if (!isGBK && buildProcess.stderr.setEncoding) {
+        buildProcess.stderr.setEncoding('utf8');
+      }
       buildProcess.stderr.on('data', (data) => {
-        stderr += data.toString();
+        let text;
+        if (isGBK) {
+          const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          text = iconv.decode(buffer, 'gbk');
+        } else {
+          text = typeof data === 'string' ? data : data.toString('utf8');
+        }
+        stderr += text;
       });
 
       buildProcess.on('close', (code) => {
@@ -160,8 +188,23 @@ export class AgentInjector {
       let stdout = '';
       let stderr = '';
 
+      // 获取编码配置，默认为 utf-8
+      const encoding = this.config?.server?.encoding || 'utf-8';
+      const isGBK = encoding.toLowerCase() === 'gbk';
+
+      // 设置编码（仅 UTF-8 支持 setEncoding）
+      if (!isGBK && attachProcess.stdout.setEncoding) {
+        attachProcess.stdout.setEncoding('utf8');
+      }
       attachProcess.stdout.on('data', (data) => {
-        const output = data.toString();
+        let text;
+        if (isGBK) {
+          const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          text = iconv.decode(buffer, 'gbk');
+        } else {
+          text = typeof data === 'string' ? data : data.toString('utf8');
+        }
+        const output = text;
         stdout += output;
         output.split('\n').forEach(line => {
           if (line.trim()) {
@@ -170,8 +213,19 @@ export class AgentInjector {
         });
       });
 
+      // 设置编码（仅 UTF-8 支持 setEncoding）
+      if (!isGBK && attachProcess.stderr.setEncoding) {
+        attachProcess.stderr.setEncoding('utf8');
+      }
       attachProcess.stderr.on('data', (data) => {
-        stderr += data.toString();
+        let text;
+        if (isGBK) {
+          const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          text = iconv.decode(buffer, 'gbk');
+        } else {
+          text = typeof data === 'string' ? data : data.toString('utf8');
+        }
+        stderr += text;
       });
 
       attachProcess.on('close', (code) => {

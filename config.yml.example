@@ -12,8 +12,13 @@ server:
   startCommand: ''
   
   # 日志解析 handler
-  # 可选值: "vanilla", "forge"
+  # 可选值: "vanilla", "forge", "paper"
   handler: "vanilla"
+  
+  # 服务器输出编码
+  # 可选值: "utf-8", "gbk"
+  # Windows 系统如果中文显示乱码，可以尝试使用 "gbk"
+  encoding: "utf-8"
 
 # 日志配置
 logging:
