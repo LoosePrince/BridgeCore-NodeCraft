@@ -18,7 +18,10 @@ export class InteractiveCLI {
     
     // 补全相关状态
     this.currentInput = '';
-    this.completions = [];
+    this.cursorPosition = 0; // 光标在输入中的位置
+    this.completions = []; // 候选列表（只包含显示部分）
+    this.fullCompletions = []; // 完整补全列表（用于Tab补全）
+    this.completionInfo = null; // 补全信息 {candidates, shouldShow, type}
     this.selectedIndex = 0;
     this.showingCompletions = false;
     this.hasCompletionsDisplayed = false; // 标记是否显示了补全行
@@ -96,6 +99,12 @@ export class InteractiveCLI {
       return;
     }
     
+    // 处理多字符输入（如粘贴）
+    if (data.length > 1) {
+      this.handleMultipleChars(data);
+      return;
+    }
+    
     // Enter
     if (keyCode === 13 || keyCode === 10) {
       this.handleEnter();
@@ -108,9 +117,15 @@ export class InteractiveCLI {
       return;
     }
     
-    // Backspace 或 Delete
+    // Backspace
     if (keyCode === 127 || keyCode === 8) {
       this.handleBackspace();
+      return;
+    }
+    
+    // Delete (某些终端可能使用不同的编码)
+    if (keyCode === 127 && data.length > 1) {
+      this.handleDelete();
       return;
     }
     
@@ -119,19 +134,88 @@ export class InteractiveCLI {
       this.handleChar(String.fromCharCode(keyCode));
     }
   }
+  
+  /**
+   * 处理多字符输入（如粘贴）
+   */
+  handleMultipleChars(data) {
+    const text = data.toString();
+    let pendingInput = '';
+    
+    // 逐字符处理
+    for (let i = 0; i < text.length; i++) {
+      const charCode = text.charCodeAt(i);
+      
+      // 处理换行和回车
+      if (charCode === 13 || charCode === 10) {
+        // 如果有待处理的输入，先添加到当前输入
+        if (pendingInput.length > 0) {
+          this.currentInput += pendingInput;
+          pendingInput = '';
+          this.exitHistoryMode();
+          this.updateCompletions();
+        }
+        
+        // 执行命令（如果有输入）
+        if (this.currentInput.trim().length > 0) {
+          this.handleEnter();
+        }
+        continue;
+      }
+      
+      // 跳过其他控制字符
+      if (charCode < 32) {
+        continue;
+      }
+      
+      // 收集可打印字符
+      if (charCode >= 32 && charCode < 127) {
+        pendingInput += text[i];
+      }
+    }
+    
+    // 处理剩余的字符
+    if (pendingInput.length > 0) {
+      // 在光标位置插入字符
+      if (this.cursorPosition < this.currentInput.length) {
+        this.currentInput = 
+          this.currentInput.slice(0, this.cursorPosition) + 
+          pendingInput + 
+          this.currentInput.slice(this.cursorPosition);
+      } else {
+        this.currentInput += pendingInput;
+      }
+      this.cursorPosition += pendingInput.length;
+      this.exitHistoryMode();
+      this.updateCompletions();
+      this.renderPrompt();
+    }
+  }
 
   /**
    * 处理 ESC 序列（方向键等）
    */
   processEscapeSequence(seq) {
-    // 方向键左: \u001b[D 或 \u001bOD（上一个候选项）
+    // 方向键左: \u001b[D 或 \u001bOD
     if (seq === '\u001b[D' || seq === '\u001bOD') {
+      if (this.showingCompletions && this.completions.length > 0) {
+        // 有候选显示时，切换候选
       this.handleArrowLeft();
+      } else {
+        // 无候选显示时，移动光标
+        this.moveCursorLeft();
+      }
       return;
     }
-    // 方向键右: \u001b[C 或 \u001bOC（下一个候选项）
+    // 方向键右: \u001b[C 或 \u001bOC
     if (seq === '\u001b[C' || seq === '\u001bOC') {
+      if (this.showingCompletions && this.completions.length > 0) {
+        // 有候选显示时，切换候选
       this.handleArrowRight();
+      } else {
+        // 无候选显示时，移动光标
+        this.moveCursorRight();
+      }
       return;
     }
     // 方向键上: \u001b[A 或 \u001bOA
@@ -145,18 +229,44 @@ export class InteractiveCLI {
       return;
     }
   }
+  
+  /**
+   * 光标向左移动
+   */
+  moveCursorLeft() {
+    if (this.cursorPosition > 0) {
+      this.cursorPosition--;
+      this.renderPrompt();
+    }
+  }
+  
+  /**
+   * 光标向右移动
+   */
+  moveCursorRight() {
+    if (this.cursorPosition < this.currentInput.length) {
+      this.cursorPosition++;
+      this.renderPrompt();
+    }
+  }
 
   /**
    * 处理字符输入
    */
   handleChar(char) {
-    // 如果用户开始输入，退出历史记录浏览模式
-    if (this.historyIndex !== -1) {
-      this.historyIndex = -1;
-      this.tempInput = '';
-    }
+    this.exitHistoryMode();
+    
+    // 在光标位置插入字符
+    if (this.cursorPosition < this.currentInput.length) {
+      this.currentInput = 
+        this.currentInput.slice(0, this.cursorPosition) + 
+        char + 
+        this.currentInput.slice(this.cursorPosition);
+    } else {
     this.currentInput += char;
-    // 更新补全（会检查是否完全匹配，如果完全匹配则不显示补全）
+    }
+    
+    this.cursorPosition++;
     this.updateCompletions();
     this.renderPrompt();
   }
@@ -165,34 +275,106 @@ export class InteractiveCLI {
    * 处理退格
    */
   handleBackspace() {
-    // 如果用户开始输入，退出历史记录浏览模式
-    if (this.historyIndex !== -1) {
-      this.historyIndex = -1;
-      this.tempInput = '';
-    }
-    if (this.currentInput.length > 0) {
-      this.currentInput = this.currentInput.slice(0, -1);
+    this.exitHistoryMode();
+    
+    if (this.cursorPosition > 0) {
+      // 删除光标前的字符
+      this.currentInput = 
+        this.currentInput.slice(0, this.cursorPosition - 1) + 
+        this.currentInput.slice(this.cursorPosition);
+      this.cursorPosition--;
       this.updateCompletions();
       this.renderPrompt();
     }
   }
 
   /**
-   * 处理 Tab
+   * 处理 Delete 键
    */
-  handleTab() {
-    if (this.completions.length > 0) {
-      this.currentInput = this.completions[this.selectedIndex];
-      // 补全后清除补全状态，继续输入时会重新触发
-      this.completions = [];
-      this.selectedIndex = 0;
-      this.showingCompletions = false;
-      // 先清除补全显示
-      this.clearCompletions();
-      // 更新补全（检查是否完全匹配）
+  handleDelete() {
+    this.exitHistoryMode();
+    
+    if (this.cursorPosition < this.currentInput.length) {
+      // 删除光标后的字符
+      this.currentInput = 
+        this.currentInput.slice(0, this.cursorPosition) + 
+        this.currentInput.slice(this.cursorPosition + 1);
       this.updateCompletions();
       this.renderPrompt();
     }
+  }
+  
+  /**
+   * 退出历史记录浏览模式
+   */
+  exitHistoryMode() {
+    if (this.historyIndex !== -1) {
+      this.historyIndex = -1;
+      this.tempInput = '';
+    }
+  }
+
+  /**
+   * 处理 Tab - 补全当前选中候选
+   */
+  handleTab() {
+    if (this.completions.length === 0 || !this.completionInfo) {
+      return;
+    }
+    
+    const selectedCandidate = this.completions[this.selectedIndex];
+    const prefix = this.commandHandler.prefix;
+    const commandInput = this.currentInput.substring(prefix.length);
+    const trimmedInput = commandInput.trim();
+    const hasTrailingSpace = commandInput.endsWith(' ');
+    
+    // 根据补全类型进行补全
+    const completionType = this.completionInfo.type;
+    this.currentInput = this.buildCompletionInput(
+      selectedCandidate,
+      prefix,
+      trimmedInput,
+      hasTrailingSpace,
+      completionType
+    );
+    
+    // 补全后，光标移到末尾
+    this.cursorPosition = this.currentInput.length;
+    
+    // 重置补全状态
+    this.resetCompletionState();
+    this.clearCompletions();
+    this.updateCompletions();
+    this.renderPrompt();
+  }
+  
+  /**
+   * 构建补全后的输入
+   */
+  buildCompletionInput(selectedCandidate, prefix, trimmedInput, hasTrailingSpace, type) {
+    if (type === 'command') {
+      return prefix + selectedCandidate;
+    }
+    
+    // 子命令或参数补全
+    if (hasTrailingSpace) {
+      return this.currentInput.trim() + ' ' + selectedCandidate;
+    }
+    
+    const inputParts = trimmedInput.split(/\s+/);
+    inputParts[inputParts.length - 1] = selectedCandidate;
+    return prefix + inputParts.join(' ');
+  }
+  
+  /**
+   * 重置补全状态
+   */
+  resetCompletionState() {
+    this.completions = [];
+    this.fullCompletions = [];
+    this.completionInfo = null;
+    this.selectedIndex = 0;
+    this.showingCompletions = false;
   }
 
   /**
@@ -201,6 +383,8 @@ export class InteractiveCLI {
   handleArrowLeft() {
     if (this.completions.length > 0) {
       this.selectedIndex = (this.selectedIndex - 1 + this.completions.length) % this.completions.length;
+      // 确保选中的候选在视图中可见
+      this.ensureSelectedVisible();
       this.renderCompletions();
     }
   }
@@ -211,40 +395,66 @@ export class InteractiveCLI {
   handleArrowRight() {
     if (this.completions.length > 0) {
       this.selectedIndex = (this.selectedIndex + 1) % this.completions.length;
+      // 确保选中的候选在视图中可见
+      this.ensureSelectedVisible();
       this.renderCompletions();
     }
   }
 
   /**
-   * 处理方向键上（历史记录上一个或补全行切换）
+   * 确保选中的候选在视图中可见
    */
-  handleArrowUp() {
-    // 如果正在显示补全，切换补全显示的行范围
-    if (this.showingCompletions && this.completions.length > 0) {
-      // 计算总行数
+  ensureSelectedVisible() {
+    if (!this.showingCompletions || this.completions.length === 0) {
+      return;
+    }
+    
+    const { itemsPerLine, totalRows, maxStartRow } = this.calculateCompletionLayout(this.completions);
+    const selectedRow = Math.floor(this.selectedIndex / itemsPerLine);
+    const currentEndRow = Math.min(this.completionStartRow + this.completionRowsPerPage, totalRows);
+    
+    // 调整显示范围使选中候选可见
+    if (selectedRow < this.completionStartRow) {
+      this.completionStartRow = selectedRow;
+    } else if (selectedRow >= currentEndRow) {
+      this.completionStartRow = Math.max(0, Math.min(
+        selectedRow - this.completionRowsPerPage + 1,
+        maxStartRow
+      ));
+    }
+  }
+  
+  /**
+   * 计算补全布局信息
+   */
+  calculateCompletionLayout(candidates) {
       const terminalWidth = process.stdout.columns || 80;
       const getDisplayWidth = (text) => text.replace(/\u001b\[[0-9;]*m/g, '').length;
-      const candidatesWithWidth = this.completions.map(comp => {
-        const width = getDisplayWidth(comp);
-        return { width };
-      });
       
       let itemsPerLine = 0;
       let currentLineWidth = 0;
-      for (const candidate of candidatesWithWidth) {
-        const itemWidth = candidate.width + 1;
+    for (const candidate of candidates) {
+      const itemWidth = getDisplayWidth(candidate) + 1;
         if (currentLineWidth + itemWidth > terminalWidth && currentLineWidth > 0) {
           break;
         }
         currentLineWidth += itemWidth;
         itemsPerLine++;
       }
-      if (itemsPerLine === 0) itemsPerLine = 1;
       
-      const totalRows = Math.ceil(this.completions.length / itemsPerLine);
+    itemsPerLine = Math.max(1, itemsPerLine);
+    const totalRows = Math.ceil(candidates.length / itemsPerLine);
       const maxStartRow = Math.max(0, totalRows - this.completionRowsPerPage);
       
-      // 向上切换行（显示更早的行）
+    return { itemsPerLine, totalRows, maxStartRow };
+  }
+
+  /**
+   * 处理方向键上（历史记录上一个或补全视图向上滚动）
+   */
+  handleArrowUp() {
+    if (this.showingCompletions && this.completions.length > 0) {
+      const { maxStartRow } = this.calculateCompletionLayout(this.completions);
       if (this.completionStartRow > 0) {
         this.completionStartRow--;
         this.renderCompletions();
@@ -252,61 +462,34 @@ export class InteractiveCLI {
       return;
     }
     
-    // 如果当前不在历史模式且输入不为空，则不处理
     if (this.historyIndex === -1 && this.currentInput.trim().length > 0) {
       return;
     }
     
-    // 如果历史记录为空，不处理
     if (this.history.length === 0) {
       return;
     }
     
-    // 如果第一次按上键，保存当前输入（虽然应该是空的）
     if (this.historyIndex === -1) {
       this.tempInput = this.currentInput;
-      this.historyIndex = this.history.length; // 设置为末尾+1，这样第一次--会指向最后一个
+      this.historyIndex = this.history.length;
     }
     
-    // 向上移动历史索引
     if (this.historyIndex > 0) {
       this.historyIndex--;
       this.currentInput = this.history[this.historyIndex];
+      this.cursorPosition = this.currentInput.length; // 光标移到末尾
       this.updateCompletions();
       this.renderPrompt();
     }
   }
 
   /**
-   * 处理方向键下（历史记录下一个或补全行切换）
+   * 处理方向键下（历史记录下一个或补全视图向下滚动）
    */
   handleArrowDown() {
-    // 如果正在显示补全，切换补全显示的行范围
     if (this.showingCompletions && this.completions.length > 0) {
-      // 计算总行数
-      const terminalWidth = process.stdout.columns || 80;
-      const getDisplayWidth = (text) => text.replace(/\u001b\[[0-9;]*m/g, '').length;
-      const candidatesWithWidth = this.completions.map(comp => {
-        const width = getDisplayWidth(comp);
-        return { width };
-      });
-      
-      let itemsPerLine = 0;
-      let currentLineWidth = 0;
-      for (const candidate of candidatesWithWidth) {
-        const itemWidth = candidate.width + 1;
-        if (currentLineWidth + itemWidth > terminalWidth && currentLineWidth > 0) {
-          break;
-        }
-        currentLineWidth += itemWidth;
-        itemsPerLine++;
-      }
-      if (itemsPerLine === 0) itemsPerLine = 1;
-      
-      const totalRows = Math.ceil(this.completions.length / itemsPerLine);
-      const maxStartRow = Math.max(0, totalRows - this.completionRowsPerPage);
-      
-      // 向下切换行（显示更晚的行）
+      const { maxStartRow } = this.calculateCompletionLayout(this.completions);
       if (this.completionStartRow < maxStartRow) {
         this.completionStartRow++;
         this.renderCompletions();
@@ -314,26 +497,23 @@ export class InteractiveCLI {
       return;
     }
     
-    // 如果当前不在历史模式且输入不为空，则不处理
-    if (this.historyIndex === -1 && this.currentInput.trim().length > 0) {
-      return;
-    }
-    
-    // 如果不在历史记录浏览模式，不处理
     if (this.historyIndex === -1) {
+      if (this.currentInput.trim().length > 0) {
+        return;
+      }
       return;
     }
     
-    // 向下移动历史索引
     if (this.historyIndex < this.history.length - 1) {
       this.historyIndex++;
       this.currentInput = this.history[this.historyIndex];
+      this.cursorPosition = this.currentInput.length; // 光标移到末尾
       this.updateCompletions();
       this.renderPrompt();
     } else {
-      // 到达历史记录末尾，恢复临时输入（通常是空）
       this.historyIndex = -1;
       this.currentInput = this.tempInput;
+      this.cursorPosition = this.currentInput.length; // 光标移到末尾
       this.tempInput = '';
       this.updateCompletions();
       this.renderPrompt();
@@ -345,31 +525,20 @@ export class InteractiveCLI {
    */
   async handleEnter() {
     const input = this.currentInput.trim();
+    
+    // 重置所有状态
     this.currentInput = '';
-    this.completions = [];
-    this.selectedIndex = 0;
-    this.showingCompletions = false;
+    this.cursorPosition = 0;
+    this.resetCompletionState();
     this.hasCompletionsDisplayed = false;
-    this.historyIndex = -1; // 退出历史记录浏览模式
+    this.historyIndex = -1;
     this.tempInput = '';
     
-    // 清除补全显示
     this.clearCompletions();
-    
-    // 换行
     process.stdout.write('\n');
     
-    // 处理命令
     if (input) {
-      // 保存到历史记录（不保存重复的连续命令）
-      if (this.history.length === 0 || this.history[this.history.length - 1] !== input) {
-        this.history.push(input);
-        // 限制历史记录数量（最多保存 100 条）
-        if (this.history.length > 100) {
-          this.history.shift();
-        }
-      }
-      
+      this.addToHistory(input);
       const shouldContinue = await this.commandHandler.handle(input);
       if (!shouldContinue) {
         this.close();
@@ -379,6 +548,18 @@ export class InteractiveCLI {
     
     this.renderPrompt();
   }
+  
+  /**
+   * 添加到历史记录
+   */
+  addToHistory(input) {
+    if (this.history.length === 0 || this.history[this.history.length - 1] !== input) {
+      this.history.push(input);
+      if (this.history.length > 100) {
+        this.history.shift();
+      }
+    }
+  }
 
   /**
    * 更新补全列表
@@ -387,13 +568,20 @@ export class InteractiveCLI {
     const previousShowing = this.showingCompletions;
     const previousHasDisplayed = this.hasCompletionsDisplayed;
     
-    this.completions = this.completer.complete(this.currentInput);
-    this.selectedIndex = 0;
-    this.showingCompletions = this.completions.length > 0;
+    // 获取补全信息
+    this.completionInfo = this.completer.complete(this.currentInput);
+    this.completions = this.completionInfo.candidates || [];
+    this.showingCompletions = this.completionInfo.shouldShow && this.completions.length > 0;
     
-    // 如果补全列表发生变化，重置显示行到第一行
+    // 如果补全列表发生变化，重置选中索引和显示行
     if (this.showingCompletions) {
+      // 确保选中索引在有效范围内
+      if (this.selectedIndex >= this.completions.length) {
+        this.selectedIndex = 0;
+      }
       this.completionStartRow = 0;
+    } else {
+      this.selectedIndex = 0;
     }
     
     // 如果之前显示了补全但现在没有了，需要清除显示
@@ -412,9 +600,10 @@ export class InteractiveCLI {
         ? this.lastDisplayedRows 
         : this.completionRowsPerPage;
       
-      // 先确保光标在输入行末尾（这样清除后光标位置才准确）
-      const inputEndPos = this.currentInput.length + 2; // +2 for '> '
-      readline.cursorTo(process.stdout, inputEndPos);
+      // 先确保光标在正确位置（这样清除后光标位置才准确）
+      const PROMPT_LENGTH = 2; // '> ' 的长度
+      const targetPosition = PROMPT_LENGTH + this.cursorPosition;
+      readline.cursorTo(process.stdout, targetPosition);
       
       // 向下移动到补全行并清除所有行
       for (let i = 0; i < rowsToClear; i++) {
@@ -430,8 +619,8 @@ export class InteractiveCLI {
         process.stdout.write('\u001b[A'); // ESC[A 向上移动一行
       }
       
-      // 确保光标在输入行末尾
-      readline.cursorTo(process.stdout, inputEndPos);
+      // 确保光标在正确位置
+      readline.cursorTo(process.stdout, targetPosition);
       
       this.hasCompletionsDisplayed = false;
       this.lastDisplayedRows = 0; // 重置
@@ -446,142 +635,53 @@ export class InteractiveCLI {
       return;
     }
 
-    // 清除之前的补全显示
     this.clearCompletions();
 
-    // 确保光标在输入行末尾（先移动到行首，然后移动到末尾）
+    const PROMPT_LENGTH = 2; // '> ' 的长度
+    const currentCursorPos = PROMPT_LENGTH + this.cursorPosition;
     readline.cursorTo(process.stdout, 0);
-    const inputEndPos = this.currentInput.length + 2; // +2 for '> '
-    readline.cursorTo(process.stdout, inputEndPos);
-
-    // 使用换行符移动到下一行显示补全
+    readline.cursorTo(process.stdout, currentCursorPos);
     process.stdout.write('\n');
     
-    // 提取当前输入的前缀和命令部分
-    const prefix = this.commandHandler.prefix;
-    let displayCompletions = this.completions;
-    
-    // 对于顶级命令补全，显示完整命令（如 !s -> !server, !status, !stop）
-    // 对于子命令补全，只显示子命令部分（如 !server  -> start, stop）
-    // 对于参数补全，只显示参数部分（如 !plugins load  -> 1.js 或 !plugins load 1 -> 1.js）
-    if (this.currentInput.startsWith(prefix)) {
-      const commandInput = this.currentInput.substring(prefix.length);
-      const commandInputTrimmed = commandInput.trim();
-      const hasTrailingSpace = this.currentInput.endsWith(' ');
-      
-      // 如果补全项以输入开头且有剩余部分，说明是子命令补全或参数补全，只显示剩余部分
-      // 这样无论有没有末尾空格都能正确处理
-      if (commandInputTrimmed) {
-        displayCompletions = this.completions.map(comp => {
-          const compWithoutPrefix = comp.startsWith(prefix) ? comp.substring(prefix.length) : comp;
-          
-          // 检查补全项是否以输入开头
-          if (compWithoutPrefix.startsWith(commandInputTrimmed)) {
-            const remaining = compWithoutPrefix.substring(commandInputTrimmed.length).trim();
-            if (remaining) {
-              // 有剩余部分，说明是子命令或参数补全
-              // 如果补全项比输入长且没有末尾空格，可能是参数补全，提取最后一个词（参数值）
-              if (compWithoutPrefix.length > commandInputTrimmed.length && !hasTrailingSpace) {
-                // 参数补全：提取补全项的最后一个词
-                const compWords = compWithoutPrefix.split(/\s+/);
-                const inputWords = commandInputTrimmed.split(/\s+/);
-                // 如果补全项的词数大于等于输入，且最后一个词不同，说明是参数补全
-                if (compWords.length >= inputWords.length && 
-                    compWords[compWords.length - 1] !== inputWords[inputWords.length - 1]) {
-                  // 返回最后一个词（参数值）
-                  return compWords[compWords.length - 1];
-                }
-              }
-              // 否则（子命令补全），只显示剩余部分
-              return remaining.startsWith(' ') ? remaining.substring(1) : remaining;
-            }
-          }
-          
-          return comp;
-        });
-      }
-      // 否则（顶级命令补全），显示完整命令
-    }
-    
-    // 获取终端宽度（默认80）
-    const terminalWidth = process.stdout.columns || 80;
-    
-    // 计算每个候选的宽度（包括空格分隔符）
-    const getDisplayWidth = (text) => {
-      // 移除 ANSI 转义码来计算实际显示宽度
-      return text.replace(/\u001b\[[0-9;]*m/g, '').length;
-    };
-    
-    // 计算每行可以显示多少个候选
-    const candidatesWithWidth = displayCompletions.map((comp, index) => {
-      const isSelected = index === this.selectedIndex;
-      const displayText = isSelected ? chalk.bold(chalk.yellow(comp)) : comp;
-      const width = getDisplayWidth(displayText);
-      return { text: displayText, width, index };
-    });
-    
-    // 计算每行可以显示多少个候选（考虑空格）
-    let itemsPerLine = 0;
-    let currentLineWidth = 0;
-    for (const candidate of candidatesWithWidth) {
-      const itemWidth = candidate.width + 1; // +1 for space
-      if (currentLineWidth + itemWidth > terminalWidth && currentLineWidth > 0) {
-        break;
-      }
-      currentLineWidth += itemWidth;
-      itemsPerLine++;
-    }
-    
-    if (itemsPerLine === 0) {
-      itemsPerLine = 1; // 至少显示一个
-    }
-    
-    // 计算总行数
-    const totalRows = Math.ceil(displayCompletions.length / itemsPerLine);
-    
-    // 确保 completionStartRow 在有效范围内
-    const maxStartRow = Math.max(0, totalRows - this.completionRowsPerPage);
+    const { itemsPerLine, totalRows, maxStartRow } = this.calculateCompletionLayout(this.completions);
     this.completionStartRow = Math.max(0, Math.min(this.completionStartRow, maxStartRow));
     
-    // 计算要显示的行范围
     const startRow = this.completionStartRow;
     const endRow = Math.min(startRow + this.completionRowsPerPage, totalRows);
+    
+    // 准备候选显示文本
+    const candidatesWithText = this.completions.map((comp, index) => {
+      const isSelected = index === this.selectedIndex;
+      return {
+        text: isSelected ? chalk.white(comp) : chalk.gray(comp),
+        index
+      };
+    });
     
     // 渲染指定范围的行
     for (let row = startRow; row < endRow; row++) {
       const startIndex = row * itemsPerLine;
-      const endIndex = Math.min(startIndex + itemsPerLine, displayCompletions.length);
-      const rowCandidates = candidatesWithWidth.slice(startIndex, endIndex);
-      
-      // 构建这一行的文本
+      const endIndex = Math.min(startIndex + itemsPerLine, this.completions.length);
+      const rowCandidates = candidatesWithText.slice(startIndex, endIndex);
       const rowText = rowCandidates.map(c => c.text).join(' ');
       process.stdout.write(rowText);
-      
-      // 如果不是最后一行，换行
       if (row < endRow - 1) {
         process.stdout.write('\n');
       }
     }
     
-    // 计算实际显示的行数
     const displayedRows = endRow - startRow;
-    this.lastDisplayedRows = displayedRows; // 保存实际显示的行数，供清除时使用
+    this.lastDisplayedRows = displayedRows;
+    this.hasCompletionsDisplayed = true;
     
-    this.hasCompletionsDisplayed = true; // 标记已显示补全
-    
-    // 计算需要向上移动多少行（返回到输入行）
-    // 注意：我们在渲染补全前已经换行了一次，所以需要向上移动 displayedRows 行回到输入行
-    
-    // 先移动到行首（确保在正确的列位置）
+    // 返回到输入行
     readline.cursorTo(process.stdout, 0);
-    
-    // 向上移动 displayedRows 行回到输入行
     for (let i = 0; i < displayedRows; i++) {
-      process.stdout.write('\u001b[A'); // ESC[A 向上移动一行
+      process.stdout.write('\u001b[A');
     }
-    
-    // 移动到输入行末尾
-    readline.cursorTo(process.stdout, inputEndPos);
+    // 移动光标到正确位置
+    const targetPosition = PROMPT_LENGTH + this.cursorPosition;
+    readline.cursorTo(process.stdout, targetPosition);
   }
 
   /**
@@ -596,7 +696,13 @@ export class InteractiveCLI {
     readline.clearLine(process.stdout, 1);
     
     // 显示提示符和当前输入
-    process.stdout.write(chalk.cyan('> ') + this.currentInput);
+    const promptText = chalk.cyan('> ') + this.currentInput;
+    process.stdout.write(promptText);
+    
+    // 移动光标到正确位置
+    const PROMPT_LENGTH = 2; // '> ' 的长度
+    const targetPosition = PROMPT_LENGTH + this.cursorPosition;
+    readline.cursorTo(process.stdout, targetPosition);
     
     // 如果有补全，显示在下方
     if (this.showingCompletions && this.completions.length > 0) {
