@@ -40,7 +40,7 @@ public class MappingResolver {
                 } 
                 // 解析方法映射 (暂未实现详细解析，目前主要关注类名)
             }
-            AgentLogger.info("已加载 " + classMap.size() + " 个类映射");
+            AgentLogger.debug("已加载 " + classMap.size() + " 个类映射");
         } catch (IOException e) {
             AgentLogger.error("加载映射文件失败: " + e.getMessage(), e);
         }

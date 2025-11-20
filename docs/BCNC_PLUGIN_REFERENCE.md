@@ -73,6 +73,7 @@ export default {
 | `messenger` | `Messenger` | 文本组件消息工具 |
 | `permissions` | `PermissionAPI` | 权限管理 API |
 | `configHelper` | `ConfigHelperAPI` | 快捷配置接口（读写 YAML/JSON） |
+| `agent` | `AgentDataAPI` | 访问 Agent 状态快照与事件（Agent 启用时可用） |
 
 ### 2.1 命令注册
 
@@ -231,6 +232,53 @@ export default {
   }
 };
 ```
+
+### 2.8 Agent 数据 API
+
+当 Java Agent 成功注入后，`ctx.agent` 会暴露统一的数据服务，方便插件查询或订阅运行状态。
+
+```javascript
+const snapshot = ctx.agent?.getSnapshot();
+ctx.agent?.on('mapping', (info) => {
+  ctx.logger.info(`[Agent] 映射状态: ${info.status} -> ${info.path || '未生成'}`);
+});
+```
+
+#### 2.8.1 方法
+
+| 方法 | 说明 |
+| --- | --- |
+| `getSnapshot()` | 返回当前完整快照（深拷贝） |
+| `on(event, handler)` | 订阅 Agent 数据事件 |
+| `once(event, handler)` | 订阅一次性事件 |
+| `off(event, handler)` | 取消订阅 |
+
+#### 2.8.2 快照结构（示例）
+
+```json
+{
+  "status": { "connected": true, "injected": true },
+  "server": { "version": "1.21.10", "type": "VANILLA", "typeDisplay": "原版" },
+  "runtime": { "loadedClasses": 22615, "canRetransform": true, "canRedefine": true },
+  "jvm": { "java": "21.0.5", "memory": { "usedMB": 512, "maxMB": 4096 }, "processors": 8 },
+  "mapping": { "status": "ready", "path": "D:/.../server.txt", "version": "1.21.10" },
+  "updatedAt": 1730xxxxxxx
+}
+```
+
+#### 2.8.3 事件类型
+
+| 事件名 | 载荷 | 说明 |
+| --- | --- | --- |
+| `update` | 完整快照 | 任意数据更新都会触发 |
+| `status` | `{ connected, injected }` | Agent 连接/注入状态 |
+| `server` | `{ version, type, typeDisplay }` | 服务端元信息 |
+| `runtime` | `{ loadedClasses, canRetransform, canRedefine }` | 运行时能力 |
+| `jvm` | `{ java, memory, processors }` | JVM 信息 |
+| `mapping` | `{ status, path, version, source, error }` | 映射下载进度/结果 |
+
+插件可结合命令或事件响应，实现监控、仪表盘等扩展功能。
+
 
 ## 3. 事件系统
 

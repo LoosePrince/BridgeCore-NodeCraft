@@ -159,6 +159,18 @@ export class AgentCommunicator extends EventEmitter {
           this.emit('mappingRequest', data.data);
           break;
 
+        case 'SERVER_METADATA':
+          this.emit('serverMetadata', data.data);
+          break;
+
+        case 'MAPPING_READY':
+          this.emit('mappingReady', data.data);
+          break;
+
+        case 'MAPPING_FAILED':
+          this.emit('mappingFailed', data.data);
+          break;
+
         case 'RULE_REGISTERED':
           this.emit('ruleRegistered', data.data);
           break;

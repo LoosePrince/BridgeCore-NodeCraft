@@ -163,7 +163,7 @@ export class AgentInjector {
 
       const toolsJar = join(javaHome, 'lib', 'tools.jar');
       
-      this.logger.info(`正在注入 Agent 到进程 ${pid}...`);
+      this.logger.debug(`正在注入 Agent 到进程 ${pid}...`);
 
       // 构建命令：java -cp attacher.jar:tools.jar BCNCAttacher <pid> <agent.jar> <args>
       const classpath = platform() === 'win32'

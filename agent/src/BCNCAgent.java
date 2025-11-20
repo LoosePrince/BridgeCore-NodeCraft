@@ -21,6 +21,7 @@ import java.lang.invoke.MethodType;
 import java.net.Socket;
 import java.security.CodeSource;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.jar.JarFile;
@@ -42,6 +43,8 @@ public class BCNCAgent {
     private static volatile boolean mappingReady = false;
     private static volatile boolean mappingFailed = false;
     private static volatile String mappingStatusMessage = "";
+    private static volatile String pendingServerMetadata = null;
+    private static final List<String[]> pendingMappingEvents = new ArrayList<>();
     
     private static final RuleRegistry RULE_REGISTRY = ChatInterceptModule.getRuleRegistry();
     private static InterceptEventDispatcher interceptDispatcher;
@@ -61,7 +64,7 @@ public class BCNCAgent {
             MethodType type = MethodType.methodType(boolean.class, String.class, Object.class);
             MethodHandle handle = lookup.findStatic(ChatInterceptModule.class, "handleChat", type);
             System.getProperties().put(METHOD_HANDLE_KEY, handle);
-            AgentLogger.info("注册 MethodHandle");
+            AgentLogger.debug("注册 MethodHandle");
         } catch (Throwable t) {
             AgentLogger.error("注册 MethodHandle 失败: " + t.getMessage(), t);
         }
@@ -106,18 +109,21 @@ public class BCNCAgent {
         ServerType serverType = ServerType.detect(instrumentation);
         AgentLogger.info("检测到服务端类型: " + serverType.getDisplayName());
         
+        String detectedVersion = VersionDetector.detectVersion();
+        queueServerMetadata(serverType, detectedVersion);
+        
         // 启动通信线程
-        AgentLogger.info("正在启动通信服务 (端口: " + port + ")...");
+        AgentLogger.debug("正在启动通信服务 (端口: " + port + ")...");
         startCommunication(port, inst);
         
         // 准备映射文件
-        prepareMappings(serverType);
+        prepareMappings(serverType, detectedVersion);
         
         // 安装聊天拦截器
         AgentLogger.debug("正在安装聊天消息拦截器...");
         installChatInterceptor(serverType);
         
-        AgentLogger.info("Agent 初始化完成");
+        AgentLogger.debug("Agent 初始化完成");
     }
     
     /**
@@ -206,10 +212,11 @@ public class BCNCAgent {
         }
     }
     
-    private static void prepareMappings(ServerType serverType) {
+    private static void prepareMappings(ServerType serverType, String detectedVersion) {
         File mappingFile = new File("server.txt");
         if (mappingFile.exists()) {
             AgentLogger.debug("检测到现有映射文件: " + mappingFile.getAbsolutePath());
+            notifyMappingReadyToNode(mappingFile, detectedVersion, "existing");
             return;
         }
         
@@ -218,7 +225,7 @@ public class BCNCAgent {
             return;
         }
         
-        String version = VersionDetector.detectVersion();
+        String version = detectedVersion != null ? detectedVersion : VersionDetector.detectVersion();
         if (version == null) {
             AgentLogger.warn("未能检测到 Minecraft 版本，无法请求映射表下载");
             AgentLogger.warn("请手动将 server.txt 放置在服务器根目录");
@@ -227,8 +234,10 @@ public class BCNCAgent {
         
         if (requestMappingsFromBCNC(version, mappingFile) && mappingFile.exists()) {
             AgentLogger.info("映射表已准备就绪: " + mappingFile.getAbsolutePath());
+            notifyMappingReadyToNode(mappingFile, version, "downloaded");
         } else if (!mappingFile.exists()) {
             AgentLogger.warn("BCNC 未能提供映射表，将尝试在无映射文件的情况下继续");
+            notifyMappingFailedToNode(version, mappingFile.getAbsolutePath(), "download", mappingStatusMessage);
         }
     }
     
@@ -360,7 +369,7 @@ public class BCNCAgent {
                     COMMUNICATION_LOCK.notifyAll();
                 }
                 
-                AgentLogger.info("已连接到 Node.js 服务器");
+                AgentLogger.debug("已连接到 Node.js 服务器");
                 
                 // 发送就绪消息
                 sendMessage("AGENT_READY", "Agent已就绪");
@@ -368,6 +377,8 @@ public class BCNCAgent {
                 // 发送服务器信息
                 String serverInfo = getServerInfo(inst);
                 sendMessage("SERVER_INFO", serverInfo);
+                flushServerMetadata();
+                flushPendingMappingEvents();
                 
                 // 接收和处理消息
                 String message;
@@ -485,6 +496,95 @@ public class BCNCAgent {
             mappingFailed = true;
             mappingStatusMessage = data;
             MAPPING_LOCK.notifyAll();
+        }
+    }
+    
+    private static void sendOrQueueMappingEvent(String type, String payload) {
+        synchronized (pendingMappingEvents) {
+            if (out != null) {
+                sendMessage(type, payload);
+                return;
+            }
+            pendingMappingEvents.add(new String[]{type, payload});
+        }
+    }
+    
+    private static void flushPendingMappingEvents() {
+        List<String[]> eventsToSend;
+        synchronized (pendingMappingEvents) {
+            if (pendingMappingEvents.isEmpty()) {
+                return;
+            }
+            eventsToSend = new ArrayList<>(pendingMappingEvents);
+            pendingMappingEvents.clear();
+        }
+        for (String[] entry : eventsToSend) {
+            sendMessage(entry[0], entry[1]);
+        }
+    }
+    
+    private static void notifyMappingReadyToNode(File mappingFile, String version, String source) {
+        try {
+            StringBuilder payload = new StringBuilder();
+            payload.append("{\"status\":\"ready\"");
+            if (version != null) {
+                payload.append(",\"version\":\"").append(escapeJson(version)).append("\"");
+            }
+            if (mappingFile != null) {
+                payload.append(",\"path\":\"").append(escapeJson(mappingFile.getAbsolutePath())).append("\"");
+            }
+            if (source != null) {
+                payload.append(",\"source\":\"").append(escapeJson(source)).append("\"");
+            }
+            payload.append("}");
+            sendOrQueueMappingEvent("MAPPING_READY", payload.toString());
+        } catch (Exception e) {
+            AgentLogger.warn("通知 BCNC 映射状态失败: " + e.getMessage());
+        }
+    }
+    
+    private static void notifyMappingFailedToNode(String version, String path, String source, String error) {
+        try {
+            StringBuilder payload = new StringBuilder();
+            payload.append("{\"status\":\"failed\"");
+            if (version != null) {
+                payload.append(",\"version\":\"").append(escapeJson(version)).append("\"");
+            }
+            if (path != null) {
+                payload.append(",\"path\":\"").append(escapeJson(path)).append("\"");
+            }
+            if (source != null) {
+                payload.append(",\"source\":\"").append(escapeJson(source)).append("\"");
+            }
+            if (error != null) {
+                payload.append(",\"error\":\"").append(escapeJson(error)).append("\"");
+            }
+            payload.append("}");
+            sendOrQueueMappingEvent("MAPPING_FAILED", payload.toString());
+        } catch (Exception e) {
+            AgentLogger.warn("通知 BCNC 映射失败状态失败: " + e.getMessage());
+        }
+    }
+    
+    private static void queueServerMetadata(ServerType serverType, String version) {
+        try {
+            StringBuilder builder = new StringBuilder();
+            builder.append("{\"serverType\":\"").append(escapeJson(serverType.name())).append("\"");
+            builder.append(",\"serverTypeDisplay\":\"").append(escapeJson(serverType.getDisplayName())).append("\"");
+            if (version != null) {
+                builder.append(",\"version\":\"").append(escapeJson(version)).append("\"");
+            }
+            builder.append("}");
+            pendingServerMetadata = builder.toString();
+        } catch (Exception e) {
+            AgentLogger.warn("构建服务端元数据失败: " + e.getMessage());
+        }
+    }
+    
+    private static void flushServerMetadata() {
+        if (pendingServerMetadata != null) {
+            sendMessage("SERVER_METADATA", pendingServerMetadata);
+            pendingServerMetadata = null;
         }
     }
     

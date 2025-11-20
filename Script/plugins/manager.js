@@ -10,7 +10,7 @@ const SUPPORTED_SCRIPT_EXT = new Set(['.js', '.mjs', '.cjs']);
  * 插件管理器
  */
 export class PluginManager {
-  constructor({ projectRoot, logger, config, serverManager, commandHandler, rconManager, messenger, eventBus, outputProcessor, permissionManager }) {
+  constructor({ projectRoot, logger, config, serverManager, commandHandler, rconManager, messenger, eventBus, outputProcessor, permissionManager, agentDataStore = null }) {
     this.projectRoot = projectRoot;
     this.logger = logger;
     this.config = config;
@@ -21,6 +21,7 @@ export class PluginManager {
     this.eventBus = eventBus;
     this.outputProcessor = outputProcessor;
     this.permissionManager = permissionManager;
+    this.agentDataStore = agentDataStore;
     this.pluginsDir = join(projectRoot, 'plugins');
     this.cacheDir = join(projectRoot, '.bcnc-cache', 'plugins');
     this.loadedPlugins = new Map();
@@ -189,7 +190,8 @@ export class PluginManager {
         plugin.deactivate ||
         null,
       plugin,
-      context: null
+      context: null,
+      agentSubscriptions: []
     };
 
     const context = this.createPluginContext(meta, metaInfo.rootDir, pluginState);
@@ -284,6 +286,34 @@ export class PluginManager {
           }
         }
       : null;
+    const agentApi = this.agentDataStore
+      ? {
+          getSnapshot: () => this.agentDataStore.getSnapshot(),
+          on: (event, handler) => {
+            this.agentDataStore.on(event, handler);
+            pluginState.agentSubscriptions.push({ event, handler });
+            return handler;
+          },
+          once: (event, handler) => {
+            const onceHandler = (...args) => {
+              handler(...args);
+              this.agentDataStore.off(event, onceHandler);
+              pluginState.agentSubscriptions = pluginState.agentSubscriptions.filter(
+                (sub) => sub.handler !== onceHandler
+              );
+            };
+            this.agentDataStore.on(event, onceHandler);
+            pluginState.agentSubscriptions.push({ event, handler: onceHandler });
+            return onceHandler;
+          },
+          off: (event, handler) => {
+            this.agentDataStore.off(event, handler);
+            pluginState.agentSubscriptions = pluginState.agentSubscriptions.filter(
+              (sub) => !(sub.event === event && sub.handler === handler)
+            );
+          }
+        }
+      : null;
 
     const pluginConfigDir = join(this.projectRoot, 'config', meta.id);
     if (!existsSync(pluginConfigDir)) {
@@ -306,6 +336,7 @@ export class PluginManager {
       rcon: rconApi,
       messenger: this.messenger,
       events: eventsApi,
+      agent: agentApi,
       permissions: this.permissionManager ? this.permissionManager.getPublicApi() : null,
       // 快捷配置接口
       configHelper: {
@@ -387,6 +418,11 @@ export class PluginManager {
     if (state.lineProcessors) {
       state.lineProcessors.forEach((processorId) => {
         this.outputProcessor?.unregisterProcessor(processorId);
+      });
+    }
+    if (state.agentSubscriptions && this.agentDataStore) {
+      state.agentSubscriptions.forEach(({ event, handler }) => {
+        this.agentDataStore.off(event, handler);
       });
     }
 

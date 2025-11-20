@@ -465,7 +465,7 @@ export function registerBCNCCommands(registry, context) {
       
       try {
         const pid = args.length > 0 ? args[0] : 'auto';
-        logger.info(`正在注入 Agent 到进程 ${pid}...`);
+        logger.debug(`正在注入 Agent 到进程 ${pid}...`);
         await agentManager.inject(pid);
       } catch (error) {
         logger.error(`注入失败: ${error.message}`);

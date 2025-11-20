@@ -13,6 +13,7 @@ import { CommandHandler } from './commands/handler.js';
 import { Messenger } from './commands/messenger.js';
 import { PluginManager } from './plugins/manager.js';
 import { AgentManager } from './agent/manager.js';
+import { AgentDataStore } from './agent/data-store.js';
 import { PermissionManager } from './permissions/manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -45,8 +46,9 @@ async function main() {
   await rconManager.init({ autoConnect: false });
   const messenger = new Messenger({ logger, serverManager });
   
-  // 创建 Agent 管理器
-  const agentManager = new AgentManager(logger, config, serverManager);
+  // 创建 Agent 数据存储 & 管理器
+  const agentDataStore = new AgentDataStore(logger);
+  const agentManager = new AgentManager(logger, config, serverManager, agentDataStore);
   
   // 创建命令处理器
   const commandHandler = new CommandHandler(config, serverManager, logger, {
@@ -68,7 +70,8 @@ async function main() {
     messenger,
     eventBus,
     outputProcessor,
-    permissionManager
+    permissionManager,
+    agentDataStore
   });
   pluginManagerRef.current = pluginManager;
   
@@ -274,6 +277,6 @@ function setupDefaultInterceptRules({ agentManager, config, logger, commandHandl
     }
   });
 
-  logger.info(`已注册默认拦截规则: 命令前缀 "${commandPrefix}"`);
+  logger.debug(`已注册默认拦截规则: 命令前缀 "${commandPrefix}"`);
 }
 

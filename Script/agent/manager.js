@@ -9,7 +9,7 @@ import { resolveAttachableJavaPid } from '../utils/process-utils.js';
  * 统一管理 Agent 的注入和通信
  */
 export class AgentManager {
-  constructor(logger, config, serverManager) {
+  constructor(logger, config, serverManager, dataStore = null) {
     this.logger = logger;
     this.config = config;
     this.injector = new AgentInjector(logger, config);
@@ -22,6 +22,8 @@ export class AgentManager {
     this.pendingLogLevel = this.logger?.getLevel?.() || null;
     this.onAgentReady = null; // 回调函数，在 Agent ready 时调用
     this.mappingService = new MappingService(logger);
+    this.dataStore = dataStore;
+    this.updateDataStoreStatus();
   }
 
   /**
@@ -52,9 +54,12 @@ export class AgentManager {
       await this.injector.inject(String(targetPid), this.communicationPort);
       
       this.isInjected = true;
+      this.updateDataStoreStatus();
       return true;
     } catch (error) {
       this.logger.error(`Agent 注入失败: ${error.message}`);
+      this.isInjected = false;
+      this.updateDataStoreStatus();
       
       // 清理
       if (this.communicator) {
@@ -100,6 +105,8 @@ export class AgentManager {
     this.communicator.on('ready', (data) => {
       this.logger.info(`Agent 就绪: ${data}`);
       this.syncAgentLogLevel();
+      this.communicator.getJVMInfo();
+      this.updateDataStoreStatus();
       // 调用回调函数（如果已设置）
       if (this.onAgentReady) {
         this.onAgentReady();
@@ -107,16 +114,19 @@ export class AgentManager {
     });
 
     this.communicator.on('serverInfo', (data) => {
-      this.logger.info(`服务器信息: ${data}`);
+      this.logger.debug(`服务器信息: ${data}`);
+      this.handleServerInfoPayload(data);
     });
 
     this.communicator.on('disconnected', () => {
       this.logger.warn('Agent 已断开连接');
       this.isInjected = false;
+      this.updateDataStoreStatus();
     });
 
     this.communicator.on('jvmInfo', (data) => {
-      this.logger.info(`JVM 信息: ${data}`);
+      this.logger.debug(`JVM 信息: ${data}`);
+      this.handleJvmInfoPayload(data);
     });
 
     this.communicator.on('classesCount', (data) => {
@@ -125,6 +135,18 @@ export class AgentManager {
 
     this.communicator.on('mappingRequest', (payload) => {
       this.handleMappingRequest(payload);
+    });
+
+    this.communicator.on('mappingReady', (payload) => {
+      this.handleMappingReadyNotification(payload);
+    });
+
+    this.communicator.on('mappingFailed', (payload) => {
+      this.handleMappingFailedNotification(payload);
+    });
+
+    this.communicator.on('serverMetadata', (payload) => {
+      this.handleServerMetadata(payload);
     });
 
   }
@@ -212,6 +234,7 @@ export class AgentManager {
     this.interceptor = null;
     this.isInjected = false;
     this.listenersReady = false;
+    this.updateDataStoreStatus();
   }
 
   /**
@@ -245,6 +268,16 @@ export class AgentManager {
 
     const version = request?.version;
     const outputPath = request?.path;
+    if (version) {
+      this.dataStore?.setServerMetadata({ version });
+    }
+    this.dataStore?.setMappingState({
+      status: 'downloading',
+      version,
+      path: outputPath,
+      source: 'agent-request',
+      error: null
+    });
 
     try {
       const result = await this.mappingService.ensureMapping(version, outputPath);
@@ -253,12 +286,96 @@ export class AgentManager {
         path: outputPath,
         status: result.status
       });
+      this.dataStore?.setMappingState({
+        status: 'ready',
+        version,
+        path: outputPath,
+        source: result.status,
+        error: null
+      });
       this.communicator?.sendMessage?.('MAPPING_READY', response);
     } catch (err) {
       const message = err?.message || '未知错误';
       this.logger?.error?.(`映射表下载失败: ${message}`);
+      this.dataStore?.setMappingState({
+        status: 'failed',
+        version,
+        path: outputPath,
+        source: 'download',
+        error: message
+      });
       this.communicator?.sendMessage?.('MAPPING_FAILED', message);
     }
+  }
+
+  handleServerMetadata(payload) {
+    if (!payload || !this.dataStore) {
+      return;
+    }
+    try {
+      const meta = JSON.parse(payload);
+      this.dataStore.setServerMetadata(meta);
+    } catch (error) {
+      this.logger?.debug?.(`解析 SERVER_METADATA 失败: ${error.message}`);
+    }
+  }
+
+  handleServerInfoPayload(text) {
+    if (!text || !this.dataStore) {
+      return;
+    }
+    const info = parseServerInfo(text);
+    if (info) {
+      this.dataStore.setRuntimeInfo(info);
+    }
+  }
+
+  handleJvmInfoPayload(text) {
+    if (!text || !this.dataStore) {
+      return;
+    }
+    const info = parseJvmInfo(text);
+    if (info) {
+      this.dataStore.setJvmInfo(info);
+    }
+  }
+
+  updateDataStoreStatus() {
+    if (!this.dataStore) {
+      return;
+    }
+    this.dataStore.updateStatus({
+      connected: this.communicator?.isConnected?.() ?? false,
+      injected: this.isInjected
+    });
+  }
+
+  handleMappingReadyNotification(payload) {
+    if (!this.dataStore) {
+      return;
+    }
+    const info = parseMappingPayload(payload);
+    this.dataStore.setMappingState({
+      status: info?.status ?? 'ready',
+      version: info?.version ?? null,
+      path: info?.path ?? null,
+      source: info?.source ?? 'agent',
+      error: null
+    });
+  }
+
+  handleMappingFailedNotification(payload) {
+    if (!this.dataStore) {
+      return;
+    }
+    const info = parseMappingPayload(payload);
+    this.dataStore.setMappingState({
+      status: 'failed',
+      version: info?.version ?? null,
+      path: info?.path ?? null,
+      source: info?.source ?? 'agent',
+      error: info?.error ?? payload ?? '未知错误'
+    });
   }
 
   resolveTargetPid(pid) {
@@ -275,6 +392,47 @@ export class AgentManager {
       return resolvedPid;
     }
     return resolvedPid || serverPid;
+  }
+}
+
+function parseServerInfo(text) {
+  const loadedMatch = /Loaded Classes:\s*(\d+)/i.exec(text);
+  const retransformMatch = /Retransform Capable:\s*(true|false)/i.exec(text);
+  const redefineMatch = /Redefine Capable:\s*(true|false)/i.exec(text);
+  if (!loadedMatch && !retransformMatch && !redefineMatch) {
+    return null;
+  }
+  return {
+    loadedClasses: loadedMatch ? Number(loadedMatch[1]) : null,
+    canRetransform: retransformMatch ? retransformMatch[1].toLowerCase() === 'true' : null,
+    canRedefine: redefineMatch ? redefineMatch[1].toLowerCase() === 'true' : null
+  };
+}
+
+function parseJvmInfo(text) {
+  const javaMatch = /Java:\s*([^,]+)/i.exec(text);
+  const memoryMatch = /Memory:\s*([\d.]+)\s*MB\s*\/\s*([\d.]+)\s*MB/i.exec(text);
+  const procMatch = /Processors:\s*(\d+)/i.exec(text);
+  if (!javaMatch && !memoryMatch && !procMatch) {
+    return null;
+  }
+  return {
+    java: javaMatch ? javaMatch[1].trim() : null,
+    memory: memoryMatch
+      ? { usedMB: Number(memoryMatch[1]), maxMB: Number(memoryMatch[2]) }
+      : { usedMB: null, maxMB: null },
+    processors: procMatch ? Number(procMatch[1]) : null
+  };
+}
+
+function parseMappingPayload(payload) {
+  if (!payload) {
+    return null;
+  }
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return null;
   }
 }
 
