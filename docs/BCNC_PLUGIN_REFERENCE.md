@@ -72,6 +72,7 @@ export default {
 | `events` | `EventsAPI | null` | 结构化事件接口 |
 | `messenger` | `Messenger` | 文本组件消息工具 |
 | `permissions` | `PermissionAPI` | 权限管理 API |
+| `configHelper` | `ConfigHelperAPI` | 快捷配置接口（读写 YAML/JSON） |
 
 ### 2.1 命令注册
 
@@ -169,6 +170,68 @@ await ctx.messenger.sendToPlayer('PlayerName', [
 
 - 统一使用 Minecraft 原始 JSON 文本组件，确保颜色与样式一致。
 
+### 2.7 快捷配置接口
+
+`ctx.configHelper` 提供在 `pluginConfigDir` 下的快速读写配置功能，支持 YAML 和 JSON 格式。
+
+```javascript
+// 读取配置（默认使用 config.yml）
+const config = ctx.configHelper.read();
+// 或指定文件名和类型
+const config = ctx.configHelper.read('settings.json', 'json', { default: 'value' });
+
+// 写入配置（默认使用 config.yml）
+ctx.configHelper.write({ key: 'value', number: 42 });
+// 或指定文件名和类型
+ctx.configHelper.write({ key: 'value' }, 'settings.json', 'json');
+
+// 检查配置文件是否存在
+if (ctx.configHelper.exists('settings.json', 'json')) {
+  // 文件存在
+}
+```
+
+**API 说明：**
+
+- `read(filename?, type?, defaultValue?)`：读取配置
+  - `filename`：配置文件名（可选，默认为 `config.yml` 或 `config.json`）
+  - `type`：配置类型 `'yml'|'yaml'|'json'`（可选，默认从文件名推断，否则为 `yml`）
+  - `defaultValue`：默认值（如果文件不存在，默认为 `{}`）
+  - 返回：配置对象
+
+- `write(data, filename?, type?)`：写入配置
+  - `data`：要写入的配置对象
+  - `filename`：配置文件名（可选，默认为 `config.yml` 或 `config.json`）
+  - `type`：配置类型 `'yml'|'yaml'|'json'`（可选，默认从文件名推断，否则为 `yml`）
+
+- `exists(filename?, type?)`：检查配置文件是否存在
+  - `filename`：配置文件名（可选）
+  - `type`：配置类型（可选）
+  - 返回：`boolean`
+
+**示例：**
+
+```javascript
+export default {
+  meta: { /* ... */ },
+  async setup(ctx) {
+    // 读取默认配置（config.yml）
+    let settings = ctx.configHelper.read(null, null, { enabled: true, port: 8080 });
+    
+    // 修改配置
+    settings.enabled = false;
+    
+    // 保存配置
+    ctx.configHelper.write(settings);
+    
+    // 使用 JSON 格式
+    const jsonConfig = ctx.configHelper.read('data.json', 'json', {});
+    jsonConfig.lastUpdate = Date.now();
+    ctx.configHelper.write(jsonConfig, 'data.json', 'json');
+  }
+};
+```
+
 ## 3. 事件系统
 
 ### 3.1 事件总线
@@ -181,6 +244,8 @@ await ctx.messenger.sendToPlayer('PlayerName', [
 | 事件 | 数据结构 | 说明 |
 | --- | --- | --- |
 | `server:ready` | `{ duration, time, thread, line, source, timestamp }` | 服务器启动完成 |
+| `server:closing` | `{ timestamp }` | 服务器开始关闭（调用 stop() 时触发） |
+| `server:closed` | `{ code, signal, timestamp }` | 服务器已关闭（进程退出时触发） |
 | `server:line` | `{ line, source, timestamp }` | 每一行日志 |
 | `server:chat` | `{ player, message, time, thread, line, source, timestamp }` | 玩家聊天 |
 | `player:join` | `{ player, time, line, source, timestamp }` | 玩家加入 |

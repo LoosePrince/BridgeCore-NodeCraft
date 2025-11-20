@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, rmSync } from 'fs';
 import { join, extname, basename, dirname } from 'path';
 import { pathToFileURL } from 'url';
 import AdmZip from 'adm-zip';
+import { ConfigHelper } from './config-helper.js';
 
 const SUPPORTED_SCRIPT_EXT = new Set(['.js', '.mjs', '.cjs']);
 
@@ -289,6 +290,9 @@ export class PluginManager {
       mkdirSync(pluginConfigDir, { recursive: true });
     }
 
+    // 创建快捷配置接口
+    const configHelper = new ConfigHelper(pluginConfigDir, this.logger);
+
     return {
       meta,
       pluginDir,
@@ -303,6 +307,31 @@ export class PluginManager {
       messenger: this.messenger,
       events: eventsApi,
       permissions: this.permissionManager ? this.permissionManager.getPublicApi() : null,
+      // 快捷配置接口
+      configHelper: {
+        /**
+         * 读取配置
+         * @param {string} filename - 配置文件名（可选，默认为 config.yml 或 config.json）
+         * @param {'yml'|'yaml'|'json'} type - 配置类型（可选，默认从文件名推断，否则为 yml）
+         * @param {object} defaultValue - 默认值（如果文件不存在）
+         * @returns {object} 配置对象
+         */
+        read: (filename, type, defaultValue) => configHelper.read(filename, type, defaultValue),
+        /**
+         * 写入配置
+         * @param {object} data - 要写入的配置对象
+         * @param {string} filename - 配置文件名（可选，默认为 config.yml 或 config.json）
+         * @param {'yml'|'yaml'|'json'} type - 配置类型（可选，默认从文件名推断，否则为 yml）
+         */
+        write: (data, filename, type) => configHelper.write(data, filename, type),
+        /**
+         * 检查配置文件是否存在
+         * @param {string} filename - 配置文件名（可选）
+         * @param {'yml'|'yaml'|'json'} type - 配置类型（可选）
+         * @returns {boolean} 文件是否存在
+         */
+        exists: (filename, type) => configHelper.exists(filename, type)
+      },
       registerCommand: (path, definition) => {
         registry.register(path, definition);
         const storedPath = Array.isArray(path) ? [...path] : [path];

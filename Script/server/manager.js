@@ -128,6 +128,12 @@ export class ServerManager {
       
       if (this._isShuttingDown) {
         this.logger.info('服务器已关闭');
+        // 触发服务器关闭事件
+        this.eventBus?.emit('server:closed', {
+          code,
+          signal,
+          timestamp: Date.now()
+        });
         this._isShuttingDown = false;
         return;
       }
@@ -172,6 +178,11 @@ export class ServerManager {
 
     this._isShuttingDown = true;
     this.logger.info('正在关闭服务器...');
+    
+    // 触发服务器关闭开始事件
+    this.eventBus?.emit('server:closing', {
+      timestamp: Date.now()
+    });
     
     // 发送停止命令
     this.sendCommand('stop');
