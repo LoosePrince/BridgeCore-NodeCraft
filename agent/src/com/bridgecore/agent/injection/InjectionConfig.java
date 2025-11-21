@@ -3,6 +3,8 @@ package com.bridgecore.agent.injection;
 import com.bridgecore.agent.intercept.ChatInterceptModule;
 import com.bridgecore.agent.intercept.PlayerInfoExtractor;
 import com.bridgecore.agent.logging.AgentLogger;
+
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,15 +18,19 @@ public class InjectionConfig {
     private final MappingResolver mappingResolver;
 
     public InjectionConfig(ServerType serverType, List<String> targetClassNames, MethodSignature targetMethod) {
+        this(serverType, targetClassNames, targetMethod, null);
+    }
+
+    public InjectionConfig(ServerType serverType, List<String> targetClassNames, MethodSignature targetMethod, File mappingFile) {
         this.serverType = serverType;
         this.targetClassNames = new ArrayList<>(targetClassNames);
         this.targetMethod = targetMethod;
         this.mappingResolver = new MappingResolver();
         
         // 尝试加载映射文件
-        java.io.File mappingFile = new java.io.File("server.txt"); // 默认查找当前目录下的 server.txt
-        if (mappingFile.exists()) {
-            this.mappingResolver.loadMapping(mappingFile);
+        File effectiveMapping = mappingFile != null ? mappingFile : new File("server.txt");
+        if (effectiveMapping.exists()) {
+            this.mappingResolver.loadMapping(effectiveMapping);
             resolveMappedClasses();
             
             // 配置 PlayerInfoExtractor 使用映射解析器
@@ -131,6 +137,10 @@ public class InjectionConfig {
      * 获取默认配置（Fabric 1.21）
      */
     public static InjectionConfig getDefaultConfig(ServerType serverType) {
+        return getDefaultConfig(serverType, null);
+    }
+
+    public static InjectionConfig getDefaultConfig(ServerType serverType, File mappingFile) {
         List<String> classNames = new ArrayList<>();
         MethodSignature methodSig;
 
@@ -177,7 +187,7 @@ public class InjectionConfig {
                 break;
         }
 
-        return new InjectionConfig(serverType, classNames, methodSig);
+        return new InjectionConfig(serverType, classNames, methodSig, mappingFile);
     }
 }
 

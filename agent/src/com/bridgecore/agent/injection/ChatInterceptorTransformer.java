@@ -1,6 +1,5 @@
-package com.bridgecore.agent;
+package com.bridgecore.agent.injection;
 
-import com.bridgecore.agent.injection.*;
 import com.bridgecore.agent.logging.AgentLogger;
 import org.objectweb.asm.*;
 
@@ -10,6 +9,8 @@ import java.security.ProtectionDomain;
 /**
  * 聊天消息拦截器 - 字节码转换器
  * 使用模块化的类查找和代码注入策略
+ * 
+ * 这是注入模块的入口点，负责拦截目标类的字节码并注入拦截逻辑
  */
 public class ChatInterceptorTransformer implements ClassFileTransformer {
     private final InjectionConfig config;

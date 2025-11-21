@@ -54,56 +54,70 @@ if not exist "build" mkdir build
 if not exist "dist" mkdir dist
 
 echo.
-echo [1/9] 编译日志模块...
+echo [1/11] 编译日志模块...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\logging\*.java
 if errorlevel 1 (
     echo [错误] 日志模块编译失败
     exit /b 1
 )
 
-echo [2/9] 编译工具模块...
+echo [2/11] 编译工具模块...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\utils\*.java
 if errorlevel 1 (
     echo [错误] 工具模块编译失败
     exit /b 1
 )
 
-echo [3/9] 编译注入模块 (MappingResolver)...
+echo [3/11] 编译配置模块...
+%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\config\*.java
+if errorlevel 1 (
+    echo [错误] 配置模块编译失败
+    exit /b 1
+)
+
+echo [4/11] 编译异常模块...
+%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\exception\*.java
+if errorlevel 1 (
+    echo [错误] 异常模块编译失败
+    exit /b 1
+)
+
+echo [5/11] 编译核心模块...
+%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\core\*.java
+if errorlevel 1 (
+    echo [错误] 核心模块编译失败
+    exit /b 1
+)
+
+echo [6/11] 编译注入模块 (MappingResolver)...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\injection\MappingResolver.java
 if errorlevel 1 (
     echo [错误] MappingResolver 编译失败
     exit /b 1
 )
 
-echo [4/9] 编译拦截模块...
+echo [7/11] 编译拦截模块...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\intercept\*.java
 if errorlevel 1 (
     echo [错误] 拦截模块编译失败
     exit /b 1
 )
 
-echo [5/9] 编译注入模块 (其余)...
+echo [8/11] 编译注入模块 (包含 ChatInterceptorTransformer)...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\injection\*.java
 if errorlevel 1 (
     echo [错误] 注入模块编译失败
     exit /b 1
 )
 
-echo [6/9] 编译 ChatInterceptorTransformer.java...
-%JAVAC% -d build -cp "%CLASSPATH%;build" src\ChatInterceptorTransformer.java
-if errorlevel 1 (
-    echo [错误] ChatInterceptorTransformer 编译失败
-    exit /b 1
-)
-
-echo [7/9] 编译 BCNCAgent.java...
-%JAVAC% -d build -cp "%CLASSPATH%;build" src\BCNCAgent.java
+echo [9/11] 编译 BCNCAgent.java...
+%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\BCNCAgent.java
 if errorlevel 1 (
     echo [错误] BCNCAgent 编译失败
     exit /b 1
 )
 
-echo [8/9] 编译 BCNCAttacher.java...
+echo [10/11] 编译 BCNCAttacher.java...
 %JAVAC% -d build -cp "%JAVA_HOME%\lib\tools.jar" src\BCNCAttacher.java
 if errorlevel 1 (
     echo [错误] BCNCAttacher 编译失败
@@ -111,7 +125,7 @@ if errorlevel 1 (
 )
 
 REM 解压 ASM 库到 build 目录
-echo [9/9] 合并 ASM 库...
+echo [11/11] 合并 ASM 库...
 cd build
 %JAR% -xf "%ASM_JAR%"
 %JAR% -xf "%ASM_COMMONS_JAR%"
