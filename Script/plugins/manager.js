@@ -10,7 +10,7 @@ const SUPPORTED_SCRIPT_EXT = new Set(['.js', '.mjs', '.cjs']);
  * 插件管理器
  */
 export class PluginManager {
-  constructor({ projectRoot, logger, config, serverManager, commandHandler, rconManager, messenger, eventBus, outputProcessor, permissionManager, agentDataStore = null }) {
+  constructor({ projectRoot, logger, config, serverManager, commandHandler, rconManager, messenger, eventBus, outputProcessor, permissionManager, agentDataStore = null, agentManager = null }) {
     this.projectRoot = projectRoot;
     this.logger = logger;
     this.config = config;
@@ -22,6 +22,7 @@ export class PluginManager {
     this.outputProcessor = outputProcessor;
     this.permissionManager = permissionManager;
     this.agentDataStore = agentDataStore;
+    this.agentManager = agentManager;
     this.pluginsDir = join(projectRoot, 'plugins');
     this.cacheDir = join(projectRoot, '.bcnc-cache', 'plugins');
     this.loadedPlugins = new Map();
@@ -338,6 +339,7 @@ export class PluginManager {
       events: eventsApi,
       agent: agentApi,
       permissions: this.permissionManager ? this.permissionManager.getPublicApi() : null,
+      players: this.agentManager ? this.agentManager.getPlayerListManager()?.getPublicApi() : null,
       // 快捷配置接口
       configHelper: {
         /**

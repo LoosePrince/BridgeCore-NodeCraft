@@ -33,6 +33,7 @@ public enum MessageType {
     
     // 拦截事件
     CHAT_INTERCEPTED("CHAT_INTERCEPTED"),
+    PLAYER_LIST_UPDATED("PLAYER_LIST_UPDATED"),
     
     // 映射管理
     REQUEST_MAPPING("REQUEST_MAPPING"),

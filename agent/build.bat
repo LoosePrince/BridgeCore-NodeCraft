@@ -54,70 +54,70 @@ if not exist "build" mkdir build
 if not exist "dist" mkdir dist
 
 echo.
-echo [1/11] 编译日志模块...
+echo [1/12] 编译日志模块...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\logging\*.java
 if errorlevel 1 (
     echo [错误] 日志模块编译失败
     exit /b 1
 )
 
-echo [2/11] 编译工具模块...
+echo [2/12] 编译工具模块...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\utils\*.java
 if errorlevel 1 (
     echo [错误] 工具模块编译失败
     exit /b 1
 )
 
-echo [3/11] 编译配置模块...
+echo [3/12] 编译配置模块...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\config\*.java
 if errorlevel 1 (
     echo [错误] 配置模块编译失败
     exit /b 1
 )
 
-echo [4/11] 编译异常模块...
+echo [4/12] 编译异常模块...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\exception\*.java
 if errorlevel 1 (
     echo [错误] 异常模块编译失败
     exit /b 1
 )
 
-echo [5/11] 编译核心模块...
-%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\core\*.java
+echo [5/12] 编译注入模块基础类 (ServerType, MappingResolver)...
+%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\injection\ServerType.java src\com\bridgecore\agent\injection\MappingResolver.java
 if errorlevel 1 (
-    echo [错误] 核心模块编译失败
+    echo [错误] 注入模块基础类编译失败
     exit /b 1
 )
 
-echo [6/11] 编译注入模块 (MappingResolver)...
-%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\injection\MappingResolver.java
-if errorlevel 1 (
-    echo [错误] MappingResolver 编译失败
-    exit /b 1
-)
-
-echo [7/11] 编译拦截模块...
+echo [6/12] 编译拦截模块...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\intercept\*.java
 if errorlevel 1 (
     echo [错误] 拦截模块编译失败
     exit /b 1
 )
 
-echo [8/11] 编译注入模块 (包含 ChatInterceptorTransformer)...
-%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\injection\*.java
+echo [7/12] 编译核心模块...
+%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\core\*.java
 if errorlevel 1 (
-    echo [错误] 注入模块编译失败
+    echo [错误] 核心模块编译失败
     exit /b 1
 )
 
-echo [9/11] 编译 BCNCAgent.java...
+echo [8/12] 编译注入模块剩余类...
+%JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\injection\*.java
+if errorlevel 1 (
+    echo [错误] 注入模块剩余类编译失败
+    exit /b 1
+)
+
+echo [9/12] 编译 BCNCAgent.java...
 %JAVAC% -d build -cp "%CLASSPATH%;build" src\com\bridgecore\agent\BCNCAgent.java
 if errorlevel 1 (
     echo [错误] BCNCAgent 编译失败
     exit /b 1
 )
 
-echo [10/11] 编译 BCNCAttacher.java...
+echo [10/12] 编译 BCNCAttacher.java...
 %JAVAC% -d build -cp "%JAVA_HOME%\lib\tools.jar" src\BCNCAttacher.java
 if errorlevel 1 (
     echo [错误] BCNCAttacher 编译失败
@@ -125,7 +125,7 @@ if errorlevel 1 (
 )
 
 REM 解压 ASM 库到 build 目录
-echo [11/11] 合并 ASM 库...
+echo [11/12] 合并 ASM 库...
 cd build
 %JAR% -xf "%ASM_JAR%"
 %JAR% -xf "%ASM_COMMONS_JAR%"
@@ -142,6 +142,7 @@ REM 打包 Agent JAR (包含 ASM 和 Transformer)
 if exist "dist\bcnc-agent.jar" del /F /Q "dist\bcnc-agent.jar"
 if exist "dist\bcnc-attacher.jar" del /F /Q "dist\bcnc-attacher.jar"
 
+echo [12/12] 打包 JAR 文件...
 echo 打包 bcnc-agent.jar (包含 ASM)...
 cd build
 %JAR% --create --file ..\dist\bcnc-agent.jar --manifest ..\src\MANIFEST.MF com\bridgecore\agent\ org\objectweb\asm\
@@ -152,7 +153,6 @@ if errorlevel 1 (
 )
 cd ..
 
-REM 打包 Attacher JAR
 echo 打包 bcnc-attacher.jar...
 cd build
 %JAR% --create --file ..\dist\bcnc-attacher.jar --main-class com.bridgecore.agent.BCNCAttacher com\bridgecore\agent\BCNCAttacher.class
@@ -178,7 +178,8 @@ for %%A in (dist\bcnc-agent.jar) do echo   约 %%~zA 字节
 echo.
 echo 已包含:
 echo   ✓ BCNCAgent (核心)
-echo   ✓ ChatInterceptorTransformer (拦截器)
+echo   ✓ ChatInterceptorTransformer (聊天拦截器)
+echo   ✓ PlayerListInterceptorTransformer (玩家列表拦截器)
 echo   ✓ ASM 9.6 (字节码操作库)
 echo.
 exit /b 0

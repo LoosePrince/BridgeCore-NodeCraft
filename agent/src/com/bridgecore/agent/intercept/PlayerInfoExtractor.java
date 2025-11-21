@@ -46,11 +46,19 @@ public class PlayerInfoExtractor {
     private PlayerIdentity extractPlayerIdentity(Object handler) {
         PlayerIdentity identity = new PlayerIdentity();
 
-        // handler 是 ServerGamePacketListenerImpl
-        AgentLogger.debug("[PlayerExtractor] 开始提取玩家名称，handler类: " + handler.getClass().getName());
+        // 首先检查 handler 是否已经是 ServerPlayer 对象
+        String serverPlayerObfuscated = mappingResolver != null ? 
+            mappingResolver.getObfuscatedClassName("net.minecraft.server.level.ServerPlayer") : null;
         
-        // 方法0: 直接调用 ServerGamePacketListenerImpl 的 i() 方法获取 GameProfile
-        // 从日志看，i()Lcom/mojang/authlib/GameProfile; 方法存在
+        String handlerClassName = handler.getClass().getName();
+        if (isServerPlayer(handlerClassName, serverPlayerObfuscated)) {
+            PlayerIdentity playerIdentity = extractIdentityFromPlayer(handler);
+            if (playerIdentity.hasData()) {
+                return playerIdentity;
+            }
+        }
+        
+        // 方法0: 尝试调用返回 GameProfile 的方法
         try {
             // 尝试调用所有返回 GameProfile 的方法（无参数）
             for (Method method : handler.getClass().getDeclaredMethods()) {
@@ -59,7 +67,6 @@ public class PlayerInfoExtractor {
                     Class<?> returnType = method.getReturnType();
                     String returnTypeName = returnType.getName();
                     if (returnTypeName.contains("GameProfile") || returnTypeName.contains("com.mojang.authlib")) {
-                AgentLogger.debug("[PlayerExtractor] 尝试调用方法: " + method.getName() + " 返回类型: " + returnTypeName);
                         Object profile = method.invoke(handler);
                         PlayerIdentity profileIdentity = extractIdentityFromProfile(profile);
                         if (profileIdentity.hasData()) {
@@ -72,11 +79,6 @@ public class PlayerInfoExtractor {
             AgentLogger.debug("[PlayerExtractor] 调用 GameProfile 方法时出错: " + e.getMessage());
         }
         
-        // 通过映射表动态查找 ServerPlayer 的混淆类名
-        String serverPlayerObfuscated = mappingResolver != null ? 
-            mappingResolver.getObfuscatedClassName("net.minecraft.server.level.ServerPlayer") : null;
-        AgentLogger.debug("[PlayerExtractor] ServerPlayer混淆名: " + serverPlayerObfuscated);
-        
         // 方法1: 尝试调用所有返回 ServerPlayer 的无参方法
         try {
             for (Method method : getAllMethods(handler.getClass())) {
@@ -86,11 +88,9 @@ public class PlayerInfoExtractor {
                     if (returnType != null) {
                         String returnTypeName = returnType.getName();
                         if (isServerPlayer(returnTypeName, serverPlayerObfuscated)) {
-                            AgentLogger.debug("[PlayerExtractor] 调用返回 ServerPlayer 的方法: " + method.getName());
                             Object playerObj = method.invoke(handler);
                             PlayerIdentity methodIdentity = extractIdentityFromPlayer(playerObj);
                             if (methodIdentity.hasData()) {
-                                AgentLogger.debug("[PlayerExtractor] 通过方法 " + method.getName() + " 成功提取玩家: " + methodIdentity);
                                 return methodIdentity;
                             }
                         }
@@ -111,23 +111,18 @@ public class PlayerInfoExtractor {
                 
                 fieldCount++;
                 String fieldClassName = fieldValue.getClass().getName();
-                AgentLogger.debug("[PlayerExtractor] 字段 " + field.getName() + " 类型: " + fieldClassName);
                 
                 boolean fieldLooksLikePlayer = field.getName().equalsIgnoreCase("player") ||
                     field.getName().toLowerCase().contains("player");
                 
                 // 检查是否是 ServerPlayer（通过映射表动态查找混淆名）
                 if (fieldLooksLikePlayer || isServerPlayer(fieldClassName, serverPlayerObfuscated)) {
-                    AgentLogger.debug("[PlayerExtractor] 找到 ServerPlayer 字段: " + field.getName());
                     PlayerIdentity playerIdentity = extractIdentityFromPlayer(fieldValue);
                     if (playerIdentity.hasData()) {
-                        AgentLogger.debug("[PlayerExtractor] 成功提取玩家身份: " + playerIdentity);
                         return playerIdentity;
                     }
-                    AgentLogger.debug("[PlayerExtractor] 未能从 ServerPlayer 对象中提取名称");
                 }
             }
-            AgentLogger.debug("[PlayerExtractor] 遍历了 " + fieldCount + " 个非空字段，未找到 ServerPlayer");
         } catch (Exception e) {
             AgentLogger.debug("[PlayerExtractor] 遍历字段时出错: " + e.getMessage());
         }
@@ -161,11 +156,12 @@ public class PlayerInfoExtractor {
         PlayerIdentity identity = new PlayerIdentity();
         if (player == null) return identity;
 
-        AgentLogger.debug("[PlayerExtractor] 从 ServerPlayer 对象提取名称，类: " + player.getClass().getName());
-        
-        // 方法1: 遍历字段查找 GameProfile
+        // 方法1: 优先从 GameProfile 中提取（最可靠）
         try {
             int fieldCount = 0;
+            boolean foundGameProfile = false;
+            
+            // 第一遍：只查找 GameProfile
             for (Field field : getAllFields(player.getClass())) {
                 field.setAccessible(true);
                 Object fieldValue = field.get(player);
@@ -175,82 +171,113 @@ public class PlayerInfoExtractor {
                 // 检查是否是 GameProfile
                 Class<?> fieldClass = fieldValue.getClass();
                 String fieldClassName = fieldClass.getName();
-                AgentLogger.debug("[PlayerExtractor] ServerPlayer字段 " + field.getName() + " 类型: " + fieldClassName);
                 
                 if (fieldClassName.contains("GameProfile") || fieldClassName.contains("com.mojang.authlib")) {
-                    AgentLogger.debug("[PlayerExtractor] 找到 GameProfile 字段: " + field.getName());
                     PlayerIdentity profileIdentity = extractIdentityFromProfile(fieldValue);
                     identity.merge(profileIdentity);
+                    foundGameProfile = true;
+                    if (identity.hasData()) {
+                        return identity;
+                    }
                 }
-
-                // 直接检查 String/UUID 字段
-                updateIdentityFromPrimitiveField(identity, fieldValue);
             }
-            AgentLogger.debug("[PlayerExtractor] 遍历了 " + fieldCount + " 个非空字段，未找到 GameProfile");
+            
+            // 如果找到了 GameProfile 但提取失败，不再尝试从其他字段提取（避免提取错误信息）
+            if (foundGameProfile && !identity.hasData()) {
+                // GameProfile 存在但提取失败，可能是数据不完整，不再尝试其他方法
+                return identity;
+            }
         } catch (Exception e) {
             AgentLogger.debug("[PlayerExtractor] 遍历 ServerPlayer 字段时出错: " + e.getMessage());
         }
         
-        // 方法2: 尝试调用所有返回 GameProfile 的方法
-        try {
-            int methodCount = 0;
-            for (Method method : getAllMethods(player.getClass())) {
-                method.setAccessible(true);
-                Class<?> returnType = method.getParameterCount() == 0 ? method.getReturnType() : null;
-                if (returnType != null && (returnType.getName().contains("GameProfile") || 
-                    returnType.getName().contains("com.mojang.authlib"))) {
-                    methodCount++;
-                    AgentLogger.debug("[PlayerExtractor] 尝试方法: " + method.getName() + " 返回类型: " + returnType.getName());
-                    try {
-                        Object profile = method.invoke(player);
-                        PlayerIdentity profileIdentity = extractIdentityFromProfile(profile);
-                        identity.merge(profileIdentity);
-                        if (identity.hasData()) {
-                            return identity;
-                        }
-                    } catch (Exception e) {
-                        AgentLogger.debug("[PlayerExtractor] 调用方法 " + method.getName() + " 失败: " + e.getMessage());
+        // 方法2: 优先尝试 getGameProfile() 方法（最可靠的方法）
+        if (!identity.hasData()) {
+            try {
+                Method getGameProfile = player.getClass().getMethod("getGameProfile");
+                Object profile = getGameProfile.invoke(player);
+                if (profile != null) {
+                    PlayerIdentity profileIdentity = extractIdentityFromProfile(profile);
+                    identity.merge(profileIdentity);
+                    if (identity.hasData()) {
+                        return identity;
                     }
                 }
+            } catch (Exception ignored) {
+                // getGameProfile() 方法不存在，继续尝试其他方法
             }
-            AgentLogger.debug("[PlayerExtractor] 尝试了 " + methodCount + " 个返回 GameProfile 的方法");
-        } catch (Exception e) {
-            AgentLogger.debug("[PlayerExtractor] 遍历方法时出错: " + e.getMessage());
         }
         
-        // 方法3: 直接尝试 getName() / getId() 方法
-        try {
-            Method getName = player.getClass().getMethod("getName");
-            Object nameObj = getName.invoke(player);
-            if (nameObj != null) {
-                AgentLogger.debug("[PlayerExtractor] 通过 getName() 获取名称: " + nameObj);
-                identity.name = nameObj.toString();
-            }
-        } catch (Exception e) {
-            AgentLogger.debug("[PlayerExtractor] 直接调用 getName() 失败: " + e.getMessage());
-        }
-        
-        try {
-            Method getId = player.getClass().getMethod("getUUID");
-            Object uuidObj = getId.invoke(player);
-            if (uuidObj != null) {
-                identity.uuid = uuidObj.toString();
-            }
-        } catch (Exception ignored) {}
-
-        if (identity.uuid == null) {
+        // 方法3: 尝试调用所有返回 GameProfile 的方法
+        if (!identity.hasData()) {
             try {
-                Method getUniqueId = player.getClass().getMethod("getUniqueID");
-                Object uuidObj = getUniqueId.invoke(player);
+                for (Method method : getAllMethods(player.getClass())) {
+                    method.setAccessible(true);
+                    Class<?> returnType = method.getParameterCount() == 0 ? method.getReturnType() : null;
+                    if (returnType != null && (returnType.getName().contains("GameProfile") || 
+                        returnType.getName().contains("com.mojang.authlib"))) {
+                        try {
+                            Object profile = method.invoke(player);
+                            PlayerIdentity profileIdentity = extractIdentityFromProfile(profile);
+                            identity.merge(profileIdentity);
+                            if (identity.hasData()) {
+                                return identity;
+                            }
+                        } catch (Exception e) {
+                            // 忽略单个方法调用失败
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                AgentLogger.debug("[PlayerExtractor] 遍历方法时出错: " + e.getMessage());
+            }
+        }
+        
+        // 方法4: 直接尝试常见的方法名获取名称和UUID（仅在 GameProfile 提取失败时使用）
+        String[] nameMethodNames = {"getName", "getPlayerName", "getDisplayName", "getProfileName"};
+        for (String methodName : nameMethodNames) {
+            try {
+                Method getName = player.getClass().getMethod(methodName);
+                Object nameObj = getName.invoke(player);
+                if (nameObj != null) {
+                    String name = nameObj.toString();
+                    if (name != null && !name.isEmpty() && !name.equals("Unknown")) {
+                        identity.name = name;
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        
+        // 尝试获取 UUID
+        String[] uuidMethodNames = {"getUUID", "getUniqueId", "getUniqueID", "getId"};
+        for (String methodName : uuidMethodNames) {
+            try {
+                Method getUuid = player.getClass().getMethod(methodName);
+                Object uuidObj = getUuid.invoke(player);
                 if (uuidObj != null) {
-                    identity.uuid = uuidObj.toString();
+                    String uuid = uuidObj.toString();
+                    if (uuid != null && !uuid.isEmpty() && !uuid.equals("Unknown")) {
+                        identity.uuid = uuid;
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        
+        // 如果还没有 UUID，尝试通过 GameProfile 获取
+        if (identity.uuid == null || identity.uuid.equals("Unknown")) {
+            try {
+                // 尝试 getGameProfile() 方法
+                Method getGameProfile = player.getClass().getMethod("getGameProfile");
+                Object profile = getGameProfile.invoke(player);
+                if (profile != null) {
+                    PlayerIdentity profileIdentity = extractIdentityFromProfile(profile);
+                    identity.merge(profileIdentity);
                 }
             } catch (Exception ignored) {}
         }
 
-        if (!identity.hasData()) {
-            AgentLogger.debug("[PlayerExtractor] 所有方法都失败，返回 null");
-        }
         return identity;
     }
 
@@ -261,10 +288,9 @@ public class PlayerInfoExtractor {
         }
 
         Class<?> profileClass = profile.getClass();
-        AgentLogger.debug("[PlayerExtractor] 处理 GameProfile 对象: " + profileClass.getName());
 
-        // 尝试常见的方法
-        identity.name = invokeStringMethod(profile, "getName", "name", "c", "d");
+        // 优先尝试常见的方法名（最可靠）
+        identity.name = invokeStringMethod(profile, "getName", "name");
         if (identity.uuid == null) {
             Object uuidObj = invokeMethod(profile, "getId", "getUUID", "id");
             if (uuidObj != null) {
@@ -272,34 +298,84 @@ public class PlayerInfoExtractor {
             }
         }
 
-        // 尝试无参方法，返回 String/UUID
-        if (!identity.hasData()) {
-            for (Method method : profileClass.getDeclaredMethods()) {
-                try {
-                    if (method.getParameterCount() == 0) {
-                        Class<?> returnType = method.getReturnType();
-                        method.setAccessible(true);
-                        if (returnType == String.class) {
-                            Object value = method.invoke(profile);
-                            updateIdentityFromString(identity, method.getName(), (String) value);
-                        } else if (returnType.getName().equals("java.util.UUID")) {
-                            Object value = method.invoke(profile);
-                            if (value != null) {
-                                identity.uuid = value.toString();
+        // 如果已经成功提取，直接返回
+        if (identity.hasData()) {
+            return identity;
+        }
+
+        // 尝试无参方法，但只尝试特定的方法名（避免从错误字段提取）
+        String[] nameMethodCandidates = {"getName", "name", "getPlayerName", "getProfileName"};
+        for (String methodName : nameMethodCandidates) {
+            try {
+                Method method = profileClass.getMethod(methodName);
+                method.setAccessible(true);
+                if (method.getParameterCount() == 0 && method.getReturnType() == String.class) {
+                    Object value = method.invoke(profile);
+                    if (value != null) {
+                        String name = value.toString();
+                        if (isValidPlayerName(name)) {
+                            identity.name = name;
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // 尝试 UUID 方法
+        String[] uuidMethodCandidates = {"getId", "getUUID", "id", "uuid"};
+        for (String methodName : uuidMethodCandidates) {
+            try {
+                Method method = profileClass.getMethod(methodName);
+                method.setAccessible(true);
+                if (method.getParameterCount() == 0) {
+                    Class<?> returnType = method.getReturnType();
+                    if (returnType.getName().equals("java.util.UUID") || returnType == String.class) {
+                        Object value = method.invoke(profile);
+                        if (value != null) {
+                            String uuid = value.toString();
+                            if (isValidUuid(uuid) || returnType.getName().equals("java.util.UUID")) {
+                                identity.uuid = uuid;
+                                break;
                             }
                         }
                     }
-                } catch (Exception ignored) {}
-            }
+                }
+            } catch (Exception ignored) {}
         }
 
-        // 尝试字段
+        // 最后尝试字段，但只从特定字段名中提取（避免从错误字段提取）
         if (!identity.hasData()) {
+            String[] nameFieldCandidates = {"name", "playerName", "profileName"};
+            String[] uuidFieldCandidates = {"id", "uuid", "uniqueId"};
+            
             for (Field field : profileClass.getDeclaredFields()) {
                 try {
                     field.setAccessible(true);
+                    String fieldName = field.getName().toLowerCase();
                     Object value = field.get(profile);
-                    updateIdentityFromPrimitiveField(identity, value);
+                    
+                    if (value instanceof String && identity.name == null) {
+                        for (String candidate : nameFieldCandidates) {
+                            if (fieldName.contains(candidate) && isValidPlayerName((String) value)) {
+                                identity.name = (String) value;
+                                break;
+                            }
+                        }
+                    } else if (value instanceof java.util.UUID && identity.uuid == null) {
+                        identity.uuid = value.toString();
+                    } else if (value instanceof String && identity.uuid == null) {
+                        for (String candidate : uuidFieldCandidates) {
+                            if (fieldName.contains(candidate) && isValidUuid((String) value)) {
+                                identity.uuid = ((String) value).toLowerCase();
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (identity.hasData()) {
+                        break;
+                    }
                 } catch (Exception ignored) {}
             }
         }
@@ -324,10 +400,8 @@ public class PlayerInfoExtractor {
             return;
         }
         if (isValidPlayerName(value) && identity.name == null) {
-            AgentLogger.debug("[PlayerExtractor] 识别到可能的玩家名 (来源: " + source + "): " + value);
             identity.name = value;
         } else if (isValidUuid(value) && identity.uuid == null) {
-            AgentLogger.debug("[PlayerExtractor] 识别到可能的玩家 UUID (来源: " + source + "): " + value);
             identity.uuid = value.toLowerCase();
         }
     }
@@ -420,7 +494,6 @@ public class PlayerInfoExtractor {
         }
         // 如果映射解析器没有找到混淆名，但类名是常见混淆名，也接受
         if (className.equals("awy") || className.equals("aah") || className.equals("bvf")) {
-            AgentLogger.debug("[PlayerExtractor] 通过已知混淆名识别 ServerPlayer: " + className);
             return true;
         }
         return false;

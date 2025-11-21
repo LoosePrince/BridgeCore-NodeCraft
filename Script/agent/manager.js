@@ -2,6 +2,7 @@ import { AgentInjector } from './injector.js';
 import { AgentCommunicator } from './communicator.js';
 import { AgentInterceptor } from './interceptor.js';
 import { MappingService } from './mapping-service.js';
+import { PlayerListManager } from './player-list-manager.js';
 import { resolveAttachableJavaPid } from '../utils/process-utils.js';
 
 /**
@@ -22,6 +23,7 @@ export class AgentManager {
     this.pendingLogLevel = this.logger?.getLevel?.() || null;
     this.onAgentReady = null; // 回调函数，在 Agent ready 时调用
     this.mappingService = new MappingService(logger);
+    this.playerListManager = new PlayerListManager(logger);
     this.dataStore = dataStore;
     this.updateDataStoreStatus();
   }
@@ -149,6 +151,10 @@ export class AgentManager {
       this.handleServerMetadata(payload);
     });
 
+    this.communicator.on('playerListUpdated', (players) => {
+      this.handlePlayerListUpdated(players);
+    });
+
   }
 
   /**
@@ -157,6 +163,14 @@ export class AgentManager {
    */
   getInterceptor() {
     return this.interceptor;
+  }
+
+  /**
+   * 获取玩家列表管理器实例
+   * 供外部使用，用于访问玩家列表 API
+   */
+  getPlayerListManager() {
+    return this.playerListManager;
   }
 
   syncAgentLogLevel(level) {
@@ -376,6 +390,14 @@ export class AgentManager {
       source: info?.source ?? 'agent',
       error: info?.error ?? payload ?? '未知错误'
     });
+  }
+
+  handlePlayerListUpdated(players) {
+    if (!Array.isArray(players)) {
+      this.logger?.warn?.('玩家列表更新失败: 数据格式错误');
+      return;
+    }
+    this.playerListManager.updatePlayers(players);
   }
 
   resolveTargetPid(pid) {

@@ -78,6 +78,41 @@ public class MethodLocator {
         Type[] argTypes = methodType.getArgumentTypes();
         Type returnType = methodType.getReturnType();
         
+        // 检查是否是玩家列表方法（返回 Collection 或 List）
+        if (methodSignature.getParameterIndex() == -1) {
+            // 这是玩家列表方法配置
+            // 只匹配无参数的方法（getter 方法）
+            if (argTypes.length > 0) {
+                return false;
+            }
+            
+            // 返回类型必须是 Collection 或 List
+            String returnTypeName = returnType.getInternalName();
+            boolean isCollection = returnTypeName.equals("java/util/Collection") ||
+                                 returnTypeName.equals("java/util/List") ||
+                                 returnType.getSort() == Type.ARRAY;
+            
+            if (!isCollection) {
+                return false;
+            }
+            
+            // 匹配常见的方法名（无参数）
+            if (methodName.equals("getPlayers") || 
+                methodName.equals("getOnlinePlayers") ||
+                methodName.equals("players") ||
+                methodName.equals("getAllPlayers")) {
+                return true;
+            }
+            
+            // 对于混淆的方法，如果返回 List 且无参数，也匹配（但需要更严格的检查）
+            // 只匹配看起来像 getter 的方法（短方法名通常是混淆后的 getter）
+            if (methodName.length() <= 3 && descriptor.contains("List") && argTypes.length == 0) {
+                return true;
+            }
+            
+            return false;
+        }
+        
         // 聊天处理方法参数通常 1-4 个（例如 tryHandleChat(String, boolean, Runnable)）
         if (argTypes.length == 0 || argTypes.length > 4) {
             return false;

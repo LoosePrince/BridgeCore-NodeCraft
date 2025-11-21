@@ -155,6 +155,17 @@ export class AgentCommunicator extends EventEmitter {
           this.emit('chatIntercepted', { ruleId, message, playerName });
           break;
 
+        case 'PLAYER_LIST_UPDATED':
+          // 玩家列表更新事件：格式为 JSON 数组
+          try {
+            const players = JSON.parse(data.data);
+            this.emit('playerListUpdated', players);
+          } catch (err) {
+            this.logger.error(`解析玩家列表数据失败: ${err.message}`);
+            this.logger.debug(`原始数据: ${data.data}`);
+          }
+          break;
+
         case 'REQUEST_MAPPING':
           this.emit('mappingRequest', data.data);
           break;

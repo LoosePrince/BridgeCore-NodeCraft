@@ -189,5 +189,94 @@ public class InjectionConfig {
 
         return new InjectionConfig(serverType, classNames, methodSig, mappingFile);
     }
+
+    /**
+     * 获取玩家列表注入配置
+     * 用于拦截获取在线玩家列表的方法
+     */
+    public static InjectionConfig getPlayerListConfig(ServerType serverType) {
+        return getPlayerListConfig(serverType, null);
+    }
+
+    public static InjectionConfig getPlayerListConfig(ServerType serverType, File mappingFile) {
+        List<String> classNames = new ArrayList<>();
+        MethodSignature methodSig;
+
+        switch (serverType) {
+            case FABRIC:
+            case QUILT:
+                // Fabric/Quilt: PlayerList 类
+                classNames.add("net.minecraft.server.players.PlayerList");
+                classNames.add("net.minecraft.class_3242"); // 混淆名
+                // 匹配返回 Collection 或 List 的方法
+                methodSig = new MethodSignature("*", "*Ljava/util/Collection;*", -1);
+                break;
+
+            case FORGE:
+                // Forge: 类似 Fabric
+                classNames.add("net.minecraft.server.players.PlayerList");
+                classNames.add("net.minecraft.class_3242");
+                methodSig = new MethodSignature("*", "*Ljava/util/Collection;*", -1);
+                break;
+
+            case PAPER:
+            case SPIGOT:
+            case BUKKIT:
+                // Paper/Spigot/Bukkit: 使用 NMS PlayerList
+                classNames.add("net.minecraft.server.players.PlayerList");
+                classNames.add("*PlayerList");
+                methodSig = new MethodSignature("*", "*Ljava/util/Collection;*", -1);
+                break;
+
+            case VANILLA:
+            default:
+                // 原版: 使用映射文件解析混淆类名
+                classNames.add("net.minecraft.server.players.PlayerList");
+                // 匹配返回 Collection 或 List 的方法（如 getPlayers）
+                methodSig = new MethodSignature("*", "*", -1);
+                break;
+        }
+
+        InjectionConfig config = new InjectionConfig(serverType, classNames, methodSig, mappingFile);
+        
+        // 解析玩家列表相关的映射类
+        if (mappingFile != null || new File("server.txt").exists()) {
+            config.resolvePlayerListMappedClasses();
+        }
+        
+        return config;
+    }
+
+    /**
+     * 解析玩家列表相关的映射类
+     */
+    private void resolvePlayerListMappedClasses() {
+        List<String> mappedNames = new ArrayList<>();
+        
+        // 关键类：PlayerList
+        String[] keyClasses = {
+            "net.minecraft.server.players.PlayerList",
+            "net.minecraft.server.PlayerList"
+        };
+        
+        for (String className : keyClasses) {
+            String obfuscated = mappingResolver.getObfuscatedClassName(className);
+            if (obfuscated != null) {
+                AgentLogger.debug("找到玩家列表映射: " + className + " -> " + obfuscated);
+                mappedNames.add(obfuscated);
+            }
+        }
+        
+        // 也检查已有的类名
+        for (String className : targetClassNames) {
+            String obfuscated = mappingResolver.getObfuscatedClassName(className);
+            if (obfuscated != null) {
+                AgentLogger.debug("找到玩家列表映射: " + className + " -> " + obfuscated);
+                mappedNames.add(obfuscated);
+            }
+        }
+        
+        targetClassNames.addAll(mappedNames);
+    }
 }
 

@@ -9,6 +9,7 @@ import com.bridgecore.agent.core.MessageType;
 import com.bridgecore.agent.exception.MappingException;
 import com.bridgecore.agent.intercept.ChatInterceptModule;
 import com.bridgecore.agent.intercept.InterceptEventDispatcher;
+import com.bridgecore.agent.intercept.PlayerListInterceptModule;
 import com.bridgecore.agent.intercept.RuleRegistry;
 import com.bridgecore.agent.injection.*;
 import com.bridgecore.agent.logging.AgentLogger;
@@ -40,7 +41,9 @@ public class BCNCAgent {
     private static final RuleRegistry RULE_REGISTRY = ChatInterceptModule.getRuleRegistry();
     private static AgentConfig agentConfig;
     private static InterceptEventDispatcher interceptDispatcher;
+    private static PlayerListInterceptModule.PlayerListEventDispatcher playerListDispatcher;
     static final String METHOD_HANDLE_KEY = "bcnc.agent.interceptHandle";
+    static final String PLAYER_LIST_HANDLE_KEY = "bcnc.agent.playerListHandle";
 
     /**
      * 通知 Node.js 拦截事件
@@ -57,15 +60,68 @@ public class BCNCAgent {
             MethodType type = MethodType.methodType(boolean.class, String.class, Object.class);
             MethodHandle handle = lookup.findStatic(ChatInterceptModule.class, "handleChat", type);
             System.getProperties().put(METHOD_HANDLE_KEY, handle);
-            AgentLogger.debug("注册 MethodHandle");
+            AgentLogger.debug("注册聊天拦截 MethodHandle");
         } catch (Throwable t) {
-            AgentLogger.error("注册 MethodHandle 失败: " + t.getMessage(), t);
+            AgentLogger.error("注册聊天拦截 MethodHandle 失败: " + t.getMessage(), t);
+        }
+    }
+
+    private static void registerPlayerListMethodHandle() {
+        try {
+            MethodHandles.Lookup lookup = MethodHandles.lookup();
+            MethodType type = MethodType.methodType(boolean.class, Object.class);
+            MethodHandle handle = lookup.findStatic(PlayerListInterceptModule.class, "handlePlayerList", type);
+            System.getProperties().put(PLAYER_LIST_HANDLE_KEY, handle);
+            AgentLogger.debug("注册玩家列表拦截 MethodHandle");
+        } catch (Throwable t) {
+            AgentLogger.error("注册玩家列表拦截 MethodHandle 失败: " + t.getMessage(), t);
         }
     }
     
     private static void initializeInterceptModule() {
         interceptDispatcher = BCNCAgent::notifyIntercepted;
         ChatInterceptModule.initialize(interceptDispatcher);
+    }
+
+    private static void initializePlayerListInterceptModule() {
+        playerListDispatcher = BCNCAgent::notifyPlayerListUpdated;
+        PlayerListInterceptModule.initialize(playerListDispatcher);
+    }
+
+    /**
+     * 通知 Node.js 玩家列表更新事件
+     */
+    private static void notifyPlayerListUpdated(List<Map<String, String>> players) {
+        try {
+            // 将玩家列表转换为 JSON 格式
+            StringBuilder json = new StringBuilder();
+            json.append("[");
+            for (int i = 0; i < players.size(); i++) {
+                Map<String, String> player = players.get(i);
+                if (i > 0) {
+                    json.append(",");
+                }
+                json.append("{");
+                json.append("\"name\":\"").append(escapeJson(player.getOrDefault("playerName", "Unknown"))).append("\",");
+                json.append("\"uuid\":\"").append(escapeJson(player.getOrDefault("playerUuid", "Unknown"))).append("\"");
+                json.append("}");
+            }
+            json.append("]");
+            sendMessage(MessageType.PLAYER_LIST_UPDATED, json.toString());
+        } catch (Exception e) {
+            AgentLogger.error("发送玩家列表更新消息失败: " + e.getMessage(), e);
+        }
+    }
+
+    private static String escapeJson(String str) {
+        if (str == null) {
+            return "";
+        }
+        return str.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")
+                  .replace("\t", "\\t");
     }
     
     /**
@@ -93,9 +149,11 @@ public class BCNCAgent {
         
         // 初始化拦截模块
         initializeInterceptModule();
+        initializePlayerListInterceptModule();
         
         // 注册 MethodHandle
         registerMethodHandle();
+        registerPlayerListMethodHandle();
         
         // 检测服务端类型
         AgentLogger.debug("正在检测服务端类型...");
@@ -122,6 +180,10 @@ public class BCNCAgent {
         // 安装聊天拦截器
         AgentLogger.debug("正在安装聊天消息拦截器...");
         installChatInterceptor(serverType);
+        
+        // 安装玩家列表拦截器
+        AgentLogger.debug("正在安装玩家列表拦截器...");
+        installPlayerListInterceptor(serverType);
         
         AgentLogger.info("Agent 初始化完成");
     }
@@ -191,6 +253,66 @@ public class BCNCAgent {
             
         } catch (Exception e) {
             AgentLogger.error("安装拦截器失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 安装玩家列表拦截器
+     */
+    private static void installPlayerListInterceptor(ServerType serverType) {
+        try {
+            // 获取注入配置
+            File mappingFile = agentConfig != null ? agentConfig.getMappingFile() : null;
+            InjectionConfig config = InjectionConfig.getPlayerListConfig(serverType, mappingFile);
+            
+            // 创建类定位器
+            ClassLocator classLocator = new ClassLocator(instrumentation, config);
+            
+            // 创建并注册 ClassFileTransformer
+            ClassFileTransformer transformer = new PlayerListInterceptorTransformer(config);
+            instrumentation.addTransformer(transformer, true);
+            
+            AgentLogger.debug("已注册玩家列表字节码转换器");
+            
+            // 使用 ClassLocator 查找目标类
+            List<Class<?>> targetClasses = classLocator.locateTargetClasses();
+            
+            if (targetClasses.isEmpty()) {
+                AgentLogger.warn("未找到目标玩家列表类（忽略）");
+                AgentLogger.debug("目标类名: " + config.getTargetClassNames());
+                AgentLogger.debug("注意: 如果未找到目标类，它们可能在服务器启动时才会加载。Transformer 已注册，将在类首次加载时拦截。");
+                return;
+            }
+            
+            AgentLogger.debug("找到 " + targetClasses.size() + " 个候选玩家列表类");
+            
+            // 转换所有可修改的类
+            int transformedCount = 0;
+            for (Class<?> clazz : targetClasses) {
+                String name = clazz.getName();
+                
+                if (classLocator.isModifiable(clazz)) {
+                    AgentLogger.debug("正在转换玩家列表类: " + name);
+                    try {
+                        instrumentation.retransformClasses(clazz);
+                        transformedCount++;
+                        AgentLogger.debug("转换成功: " + name);
+                    } catch (Exception e) {
+                        AgentLogger.error("转换失败: " + e.getMessage(), e);
+                    }
+                } else {
+                    AgentLogger.debug("类不可修改: " + name);
+                }
+            }
+            
+            if (transformedCount > 0) {
+                AgentLogger.debug("转换了 " + transformedCount + " 个玩家列表类，拦截器已就绪");
+            } else {
+                AgentLogger.warn("未找到可修改的玩家列表类");
+            }
+            
+        } catch (Exception e) {
+            AgentLogger.error("安装玩家列表拦截器失败: " + e.getMessage(), e);
         }
     }
     

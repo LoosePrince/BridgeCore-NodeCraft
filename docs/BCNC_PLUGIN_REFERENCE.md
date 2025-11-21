@@ -74,6 +74,7 @@ export default {
 | `permissions` | `PermissionAPI` | 权限管理 API |
 | `configHelper` | `ConfigHelperAPI` | 快捷配置接口（读写 YAML/JSON） |
 | `agent` | `AgentDataAPI` | 访问 Agent 状态快照与事件（Agent 启用时可用） |
+| `players` | `PlayerListAPI` | 玩家列表 API（Agent 启用时可用） |
 
 ### 2.1 命令注册
 
@@ -278,6 +279,143 @@ ctx.agent?.on('mapping', (info) => {
 | `mapping` | `{ status, path, version, source, error }` | 映射下载进度/结果 |
 
 插件可结合命令或事件响应，实现监控、仪表盘等扩展功能。
+
+### 2.9 玩家列表 API
+
+当 Java Agent 成功注入后，`ctx.players` 会提供在线玩家列表的查询和管理功能。
+
+```javascript
+// 检查玩家列表 API 是否可用
+if (ctx.players) {
+  const playerList = ctx.players.list();
+  const count = ctx.players.count();
+  const player = ctx.players.getByName('PlayerName');
+  const isOnline = ctx.players.isOnline('PlayerName');
+}
+```
+
+#### 2.9.1 方法
+
+| 方法 | 说明 | 返回值 |
+| --- | --- | --- |
+| `list()` | 获取所有在线玩家列表 | `Array<{name: string, uuid: string}>` |
+| `getByUuid(uuid)` | 根据 UUID 获取玩家信息 | `{name: string, uuid: string}\|null` |
+| `getByName(name)` | 根据名称获取玩家信息 | `{name: string, uuid: string}\|null` |
+| `isOnline(identifier)` | 检查玩家是否在线（支持 UUID 或名称） | `boolean` |
+| `count()` | 获取在线玩家数量 | `number` |
+| `lastUpdate()` | 获取最后更新时间戳 | `number\|null` |
+| `on(event, handler)` | 监听玩家列表事件 | - |
+| `off(event, handler)` | 取消监听事件 | - |
+
+#### 2.9.2 事件类型
+
+| 事件名 | 载荷 | 说明 |
+| --- | --- | --- |
+| `listUpdated` | `{players, added, removed}` | 玩家列表更新时触发 |
+| `playerJoined` | `{name, uuid}` | 玩家加入时触发 |
+| `playerLeft` | `{name, uuid}` | 玩家离开时触发 |
+| `playerNameChanged` | `{uuid, oldName, newName}` | 玩家名称变更时触发 |
+
+#### 2.9.3 使用示例
+
+```javascript
+export default {
+  meta: { /* ... */ },
+  async setup(ctx) {
+    const { players } = ctx;
+    
+    if (!players) {
+      ctx.logger.warn('玩家列表 API 不可用（Agent 未启用）');
+      return;
+    }
+
+    // 注册命令：查看在线玩家
+    ctx.registerCommand(['players', 'list'], {
+      description: '获取在线玩家列表',
+      handler: async (args, context) => {
+        const playerList = players.list();
+        const count = players.count();
+        
+        if (count === 0) {
+          await context.reply({ 
+            text: '当前没有玩家在线', 
+            color: 'gray' 
+          });
+          return true;
+        }
+        
+        const playerNames = playerList.map(p => p.name).join(', ');
+        await context.reply({ 
+          text: `在线玩家 (${count} 人): ${playerNames}`, 
+          color: 'green' 
+        });
+        return true;
+      }
+    });
+
+    // 注册命令：查询玩家信息
+    ctx.registerCommand(['players', 'info'], {
+      description: '查询指定玩家的信息',
+      handler: async (args, context) => {
+        if (args.length === 0) {
+          await context.reply({ 
+            text: '用法: !players info <玩家名称或UUID>', 
+            color: 'yellow' 
+          });
+          return true;
+        }
+
+        const identifier = args[0];
+        let player = null;
+
+        // 尝试通过 UUID 查找
+        if (identifier.length >= 32) {
+          player = players.getByUuid(identifier);
+        }
+
+        // 如果通过 UUID 没找到，尝试通过名称查找
+        if (!player) {
+          player = players.getByName(identifier);
+        }
+
+        if (!player) {
+          await context.reply({ 
+            text: `未找到玩家: ${identifier}`, 
+            color: 'red' 
+          });
+          return true;
+        }
+
+        await context.reply({
+          text: `玩家信息:\n名称: ${player.name}\nUUID: ${player.uuid}`,
+          color: 'aqua'
+        });
+        return true;
+      }
+    });
+
+    // 监听玩家加入/离开事件
+    players.on('playerJoined', ({ name, uuid }) => {
+      ctx.logger.info(`玩家 ${name} (${uuid}) 加入服务器`);
+    });
+
+    players.on('playerLeft', ({ name, uuid }) => {
+      ctx.logger.info(`玩家 ${name} (${uuid}) 离开服务器`);
+    });
+
+    players.on('listUpdated', ({ players: updatedPlayers, added, removed }) => {
+      if (added.length > 0) {
+        ctx.logger.debug(`新增玩家: ${added.map(p => p.name).join(', ')}`);
+      }
+      if (removed.length > 0) {
+        ctx.logger.debug(`玩家离线: ${removed.map(p => p.name).join(', ')}`);
+      }
+    });
+  }
+};
+```
+
+> **注意**：玩家列表 API 仅在 Java Agent 成功注入时可用。使用前请检查 `ctx.players` 是否为 `null`。
 
 
 ## 3. 事件系统

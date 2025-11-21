@@ -71,7 +71,8 @@ async function main() {
     eventBus,
     outputProcessor,
     permissionManager,
-    agentDataStore
+    agentDataStore,
+    agentManager
   });
   pluginManagerRef.current = pluginManager;
   
