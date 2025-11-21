@@ -1,4 +1,4 @@
-import { dirname, join } from 'path';
+import { dirname, join, resolve as resolvePath } from 'path';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
 import chalk from 'chalk';
@@ -15,6 +15,7 @@ import { PluginManager } from './plugins/manager.js';
 import { AgentManager } from './agent/manager.js';
 import { AgentDataStore } from './agent/data-store.js';
 import { PermissionManager } from './permissions/manager.js';
+import { PlayerPresenceTracker } from './server/player-presence-tracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,6 +39,11 @@ async function main() {
   const eventBus = new ServerEventBus();
   const handlerName = config.server?.handler || 'vanilla';
   const outputProcessor = new ServerOutputProcessor({ eventBus, logger, handlerName });
+  const serverDirectory = config.server?.directory
+    ? resolvePath(projectRoot, config.server.directory)
+    : projectRoot;
+  const userCachePath = join(serverDirectory, 'usercache.json');
+  const playerPresenceTracker = new PlayerPresenceTracker({ eventBus, logger, userCachePath });
   const serverManager = new ServerManager(config, logger, projectRoot, {
     eventBus,
     outputProcessor
@@ -49,6 +55,7 @@ async function main() {
   // 创建 Agent 数据存储 & 管理器
   const agentDataStore = new AgentDataStore(logger);
   const agentManager = new AgentManager(logger, config, serverManager, agentDataStore);
+  agentManager.setPresenceTracker(playerPresenceTracker);
   
   // 创建命令处理器
   const commandHandler = new CommandHandler(config, serverManager, logger, {

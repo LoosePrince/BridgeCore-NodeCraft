@@ -36,7 +36,7 @@ public class InjectionConfig {
             // 配置 PlayerInfoExtractor 使用映射解析器
             ChatInterceptModule.setPlayerInfoExtractor(new PlayerInfoExtractor(this.mappingResolver));
         } else {
-            AgentLogger.warn("未找到 server.txt 映射文件，某些原版服务端可能无法完成注入");
+            AgentLogger.debug("未找到 server.txt 映射文件，某些原版服务端可能无法完成注入");
         }
     }
 

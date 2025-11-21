@@ -8,13 +8,15 @@ export class PlayerListManager extends EventEmitter {
   constructor(logger) {
     super();
     this.logger = logger;
-    this.players = new Map(); // UUID -> { name, uuid, lastUpdate }
-    this.updateInterval = null;
+    this.agentPlayers = new Map(); // uuid(lowercase) -> { name, uuid, lastUpdate }
+    this.fallbackSource = null;
+    this.fallbackHandlers = [];
     this.lastUpdateTime = null;
+    this.agentLastUpdateTime = null;
   }
 
   /**
-   * 更新玩家列表
+   * Agent 推送的玩家列表更新
    * @param {Array<{name: string, uuid: string}>} players - 玩家列表
    */
   updatePlayers(players) {
@@ -23,67 +25,139 @@ export class PlayerListManager extends EventEmitter {
       return;
     }
 
-    const previousCount = this.players.size;
-    const currentPlayers = new Set();
+    const previousPlayers = new Map(this.agentPlayers);
     const now = Date.now();
+    const added = [];
+    const removed = [];
 
-    // 更新现有玩家并添加新玩家
     for (const player of players) {
-      if (!player || !player.uuid || !player.name) {
+      if (!player || !player.name) {
         continue;
       }
+      const uuidRaw = player.uuid || null;
+      const uuidKey = uuidRaw ? uuidRaw.toLowerCase() : player.name.toLowerCase();
 
-      const uuid = player.uuid;
-      currentPlayers.add(uuid);
-
-      const existing = this.players.get(uuid);
+      const existing = this.agentPlayers.get(uuidKey);
       if (existing) {
-        // 更新现有玩家信息
         if (existing.name !== player.name) {
-          this.logger.debug(`玩家名称更新: ${existing.name} -> ${player.name} (${uuid})`);
-          this.emit('playerNameChanged', { 
-            uuid, 
-            oldName: existing.name, 
-            newName: player.name 
+          this.logger.debug(`玩家名称更新: ${existing.name} -> ${player.name} (${uuidRaw || 'unknown'})`);
+          this.emit('playerNameChanged', {
+            uuid: uuidRaw || null,
+            oldName: existing.name,
+            newName: player.name
           });
         }
         existing.name = player.name;
+        existing.uuid = uuidRaw;
         existing.lastUpdate = now;
       } else {
-        // 添加新玩家
-        this.players.set(uuid, {
+        this.agentPlayers.set(uuidKey, {
           name: player.name,
-          uuid: uuid,
+          uuid: uuidRaw,
           lastUpdate: now
         });
-        this.logger.debug(`玩家上线: ${player.name} (${uuid})`);
-        this.emit('playerJoined', { name: player.name, uuid });
+        added.push({ name: player.name, uuid: uuidRaw });
+        this.logger.debug(`玩家上线: ${player.name} (${uuidRaw || 'unknown'})`);
+        this.emit('playerJoined', { name: player.name, uuid: uuidRaw });
       }
+      previousPlayers.delete(uuidKey);
     }
 
-    // 检测离线玩家
-    const offlinePlayers = [];
-    for (const [uuid, player] of this.players.entries()) {
-      if (!currentPlayers.has(uuid)) {
-        offlinePlayers.push(player);
-        this.players.delete(uuid);
-        this.logger.debug(`玩家离线: ${player.name} (${uuid})`);
-        this.emit('playerLeft', { name: player.name, uuid });
-      }
+    for (const [uuidKey, player] of previousPlayers.entries()) {
+      this.agentPlayers.delete(uuidKey);
+      removed.push({ name: player.name, uuid: player.uuid });
+      this.logger.debug(`玩家离线: ${player.name} (${player.uuid || 'unknown'})`);
+      this.emit('playerLeft', { name: player.name, uuid: player.uuid });
     }
 
-    this.lastUpdateTime = now;
+    this.agentLastUpdateTime = now;
+    this.updateLastUpdateTime();
 
-    // 如果玩家数量发生变化，触发更新事件
-    if (this.players.size !== previousCount || offlinePlayers.length > 0) {
+    if (added.length > 0 || removed.length > 0) {
       this.emit('listUpdated', {
+        source: 'agent',
         players: this.getAllPlayers(),
-        added: players.filter(p => !this.players.has(p.uuid)),
-        removed: offlinePlayers
+        added,
+        removed
       });
+    } else {
+      this.logger.debug(`玩家列表已更新 (Agent)，人数 ${this.agentPlayers.size}`);
+    }
+  }
+
+  /**
+   * 绑定事件驱动的玩家追踪器，补全或兜底玩家数据
+   * @param {EventEmitter & { list: Function, getByUuid: Function, getByName: Function, count: Function, getLastUpdateTime: Function }} tracker
+   */
+  setFallbackSource(tracker) {
+    if (this.fallbackSource === tracker) {
+      return;
+    }
+    this.cleanupFallbackHandlers();
+    this.fallbackSource = tracker;
+    if (!tracker || typeof tracker.on !== 'function') {
+      return;
     }
 
-    this.logger.debug(`玩家列表已更新: ${this.players.size} 人在线`);
+    const bridge = (event, handler) => {
+      tracker.on(event, handler);
+      this.fallbackHandlers.push({ event, handler });
+    };
+
+    bridge('playerJoined', (payload) => {
+      if (!this.hasAgentSnapshot()) {
+        this.emit('playerJoined', payload);
+      }
+      this.emit('fallbackPlayerJoined', payload);
+    });
+
+    bridge('playerLeft', (payload) => {
+      if (!this.hasAgentSnapshot()) {
+        this.emit('playerLeft', payload);
+      }
+      this.emit('fallbackPlayerLeft', payload);
+    });
+
+    bridge('listUpdated', () => {
+      this.updateLastUpdateTime();
+      this.emit('listUpdated', {
+        source: this.hasAgentSnapshot() ? 'agent+events' : 'events',
+        players: this.getAllPlayers()
+      });
+    });
+
+    bridge('listCleared', () => {
+      if (!this.hasAgentSnapshot()) {
+        this.emit('listCleared');
+      }
+    });
+
+    this.updateLastUpdateTime();
+  }
+
+  cleanupFallbackHandlers() {
+    if (this.fallbackSource && this.fallbackHandlers.length > 0) {
+      for (const { event, handler } of this.fallbackHandlers) {
+        this.fallbackSource.off?.(event, handler);
+      }
+    }
+    this.fallbackHandlers = [];
+  }
+
+  hasAgentSnapshot() {
+    return this.agentPlayers.size > 0;
+  }
+
+  updateLastUpdateTime() {
+    const now = Date.now();
+    const fallbackTime = this.fallbackSource?.getLastUpdateTime?.() || null;
+    const agentTime = this.agentLastUpdateTime || null;
+
+    if (fallbackTime && agentTime) {
+      this.lastUpdateTime = Math.max(fallbackTime, agentTime);
+    } else {
+      this.lastUpdateTime = agentTime ?? fallbackTime ?? now;
+    }
   }
 
   /**
@@ -91,10 +165,32 @@ export class PlayerListManager extends EventEmitter {
    * @returns {Array<{name: string, uuid: string}>}
    */
   getAllPlayers() {
-    return Array.from(this.players.values()).map(p => ({
-      name: p.name,
-      uuid: p.uuid
-    }));
+    return this.getMergedPlayers();
+  }
+
+  getMergedPlayers() {
+    const merged = new Map();
+
+    if (this.fallbackSource?.list) {
+      for (const player of this.fallbackSource.list()) {
+        if (!player || !player.name) continue;
+        const key = player.uuid ? `uuid:${player.uuid.toLowerCase()}` : `name:${player.name.toLowerCase()}`;
+        merged.set(key, {
+          name: player.name,
+          uuid: player.uuid || null
+        });
+      }
+    }
+
+    for (const player of this.agentPlayers.values()) {
+      const key = player.uuid ? `uuid:${player.uuid.toLowerCase()}` : `name:${player.name.toLowerCase()}`;
+      merged.set(key, {
+        name: player.name,
+        uuid: player.uuid || null
+      });
+    }
+
+    return Array.from(merged.values());
   }
 
   /**
@@ -103,8 +199,19 @@ export class PlayerListManager extends EventEmitter {
    * @returns {{name: string, uuid: string}|null}
    */
   getPlayerByUuid(uuid) {
-    const player = this.players.get(uuid);
-    return player ? { name: player.name, uuid: player.uuid } : null;
+    if (!uuid) {
+      return null;
+    }
+    const normalized = uuid.toLowerCase();
+    const player = this.agentPlayers.get(normalized);
+    if (player) {
+      return { name: player.name, uuid: player.uuid };
+    }
+    if (this.fallbackSource?.getByUuid) {
+      const fallback = this.fallbackSource.getByUuid(uuid);
+      return fallback ? { name: fallback.name, uuid: fallback.uuid || null } : null;
+    }
+    return null;
   }
 
   /**
@@ -113,10 +220,17 @@ export class PlayerListManager extends EventEmitter {
    * @returns {{name: string, uuid: string}|null}
    */
   getPlayerByName(name) {
-    for (const player of this.players.values()) {
+    if (!name) {
+      return null;
+    }
+    for (const player of this.agentPlayers.values()) {
       if (player.name === name) {
         return { name: player.name, uuid: player.uuid };
       }
+    }
+    if (this.fallbackSource?.getByName) {
+      const fallback = this.fallbackSource.getByName(name);
+      return fallback ? { name: fallback.name, uuid: fallback.uuid || null } : null;
     }
     return null;
   }
@@ -127,7 +241,10 @@ export class PlayerListManager extends EventEmitter {
    * @returns {boolean}
    */
   isPlayerOnline(identifier) {
-    if (this.players.has(identifier)) {
+    if (!identifier) {
+      return false;
+    }
+    if (this.agentPlayers.has(identifier.toLowerCase())) {
       return true;
     }
     return this.getPlayerByName(identifier) !== null;
@@ -138,7 +255,7 @@ export class PlayerListManager extends EventEmitter {
    * @returns {number}
    */
   getPlayerCount() {
-    return this.players.size;
+    return this.getAllPlayers().length;
   }
 
   /**
@@ -153,8 +270,9 @@ export class PlayerListManager extends EventEmitter {
    * 清空玩家列表
    */
   clear() {
-    const count = this.players.size;
-    this.players.clear();
+    const count = this.agentPlayers.size;
+    this.agentPlayers.clear();
+    this.agentLastUpdateTime = null;
     this.lastUpdateTime = null;
     this.logger.debug(`玩家列表已清空 (之前有 ${count} 人)`);
     this.emit('listCleared');

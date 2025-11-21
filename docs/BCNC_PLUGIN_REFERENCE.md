@@ -74,7 +74,7 @@ export default {
 | `permissions` | `PermissionAPI` | 权限管理 API |
 | `configHelper` | `ConfigHelperAPI` | 快捷配置接口（读写 YAML/JSON） |
 | `agent` | `AgentDataAPI` | 访问 Agent 状态快照与事件（Agent 启用时可用） |
-| `players` | `PlayerListAPI` | 玩家列表 API（Agent 启用时可用） |
+| `players` | `PlayerListAPI` | 玩家列表 API（Agent + 事件双来源） |
 
 ### 2.1 命令注册
 
@@ -282,7 +282,13 @@ ctx.agent?.on('mapping', (info) => {
 
 ### 2.9 玩家列表 API
 
-当 Java Agent 成功注入后，`ctx.players` 会提供在线玩家列表的查询和管理功能。
+`ctx.players` 由两套数据源共同驱动：
+
+1. **Java Agent** 拦截的精准玩家列表（包含 UUID、真实昵称）；
+2. **BCNC 内部事件追踪器**：基于 `player:join` / `player:leave` 日志事件实时维护在线列表，作为 Agent 的兜底/补全。
+
+因此即便 Agent 未注入，`ctx.players` 也会继续提供信息；当 Agent 可用时，会自动以 Agent 数据为主、事件数据为辅进行合并。
+事件追踪器还会自动读取服务器目录中的 `usercache.json`，在日志缺少 UUID 时补全身份信息。
 
 ```javascript
 // 检查玩家列表 API 是否可用
@@ -415,7 +421,7 @@ export default {
 };
 ```
 
-> **注意**：玩家列表 API 仅在 Java Agent 成功注入时可用。使用前请检查 `ctx.players` 是否为 `null`。
+> **注意**：`ctx.players` 始终可用；当 Java Agent 暂不可用时，API 会回落到事件追踪数据（可能在极少数情况下缺少 UUID），可根据 `ctx.players.lastUpdate()` 或自定义逻辑决定提示内容。
 
 
 ## 3. 事件系统

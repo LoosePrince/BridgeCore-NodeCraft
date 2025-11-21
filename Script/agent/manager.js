@@ -173,6 +173,17 @@ export class AgentManager {
     return this.playerListManager;
   }
 
+  /**
+   * 注册基于事件的玩家在线追踪器，作为 Agent 数据的补充
+   * @param {object} tracker
+   */
+  setPresenceTracker(tracker) {
+    if (!this.playerListManager) {
+      return;
+    }
+    this.playerListManager.setFallbackSource(tracker);
+  }
+
   syncAgentLogLevel(level) {
     const targetLevel = level || this.logger?.getLevel?.();
     if (!targetLevel) {
