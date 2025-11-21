@@ -98,6 +98,132 @@ ctx.unregisterCommand(['plugin', 'reload']);
 - `permissionLevel`：可选，指定命令所需的最低权限级别（1-4）
 - `denyMessage`：可选，权限不足时显示的消息（默认："你没有权限执行此命令"）
 
+#### 2.1.1 命令参数定义
+
+可以为命令定义参数，以提供更好的 CLI 补全体验：
+
+```javascript
+ctx.registerCommand(['players', 'info'], {
+  description: '查询指定玩家的信息',
+  args: [
+    {
+      name: 'player',
+      description: '玩家名称或UUID',
+      required: true,
+      type: 'string',
+      options: '<players>'  // 使用占位符自动提供在线玩家列表作为候选
+    }
+  ],
+  handler: async (args, context) => {
+    // args[0] 是玩家名称或UUID
+    const player = ctx.players.getByName(args[0]) || ctx.players.getByUuid(args[0]);
+    // ...
+  }
+});
+```
+
+**参数定义字段：**
+- `name`：参数名称（用于帮助信息）
+- `description`：参数描述
+- `required`：是否必需（`true`/`false`）
+- `type`：参数类型（`'string'`、`'number'` 等）
+- `options`：可选，可以是：
+  - 数组：静态候选列表，如 `['option1', 'option2']`
+  - 函数：动态候选生成函数，接收上下文并返回候选数组
+  - 字符串占位符：使用预定义的占位符，如 `'<players>'`
+
+**支持的占位符：**
+
+BCNC 内置了以下占位符，可在 `options` 字段中使用：
+
+| 占位符 | 说明 | 返回值示例 |
+| --- | --- | --- |
+| `<players>` | 当前在线玩家名称列表 | `['Player1', 'Player2', 'Shusao']` |
+| `<player-uuid>` | 当前在线玩家 UUID 列表 | `['550e8400-e29b-41d4-a716-446655440000', ...]` |
+| `<offline-players>` | 离线玩家名称列表（从 `usercache.json` 获取） | `['OfflinePlayer1', 'OfflinePlayer2']` |
+| `<plugins>` | 已加载的插件 ID 列表 | `['plugin-1', 'plugin-2']` |
+| `<plugin-entries>` | 所有插件入口文件列表（包括未加载的） | `['1.js', 'example/index.js']` |
+| `<permission-levels>` | 权限级别列表 | `['1', '2', '3', '4']` |
+| `<players-with-permission>` | 拥有自定义权限的玩家列表（如果前一个参数是权限级别，则筛选该级别） | `['Admin1', 'Admin2']` |
+| `<commands>` | 所有顶级命令列表 | `['help', 'stop', 'plugins']` |
+| `<subcommands>` | 当前命令的子命令列表（自动从命令路径推断） | `['list', 'info', 'count']`（对于 `!players` 命令） |
+
+**使用示例：**
+
+```javascript
+// 玩家相关占位符
+ctx.registerCommand(['kick'], {
+  args: [
+    { name: 'player', options: '<players>' }  // 在线玩家列表
+  ],
+  handler: async (args) => { /* ... */ }
+});
+
+ctx.registerCommand(['player', 'uuid'], {
+  args: [
+    { name: 'player', options: '<player-uuid>' }  // 在线玩家 UUID 列表
+  ],
+  handler: async (args) => { /* ... */ }
+});
+
+ctx.registerCommand(['player', 'info'], {
+  args: [
+    { name: 'player', options: '<offline-players>' }  // 离线玩家列表
+  ],
+  handler: async (args) => { /* ... */ }
+});
+
+// 插件管理占位符
+ctx.registerCommand(['plugin', 'reload'], {
+  args: [
+    { name: 'pluginId', options: '<plugins>' }  // 已加载的插件 ID
+  ],
+  handler: async (args) => { /* ... */ }
+});
+
+ctx.registerCommand(['plugin', 'load'], {
+  args: [
+    { name: 'entry', options: '<plugin-entries>' }  // 所有插件入口文件
+  ],
+  handler: async (args) => { /* ... */ }
+});
+
+// 权限管理占位符
+ctx.registerCommand(['perm', 'set'], {
+  args: [
+    { name: 'player', options: '<players>' },
+    { name: 'level', options: '<permission-levels>' }  // 权限级别 1-4
+  ],
+  handler: async (args) => { /* ... */ }
+});
+
+ctx.registerCommand(['perm', 'list'], {
+  args: [
+    { name: 'level', options: '<permission-levels>' },  // 先选择级别
+    { name: 'player', options: '<players-with-permission>' }  // 再筛选该级别的玩家
+  ],
+  handler: async (args) => { /* ... */ }
+});
+
+// 命令系统占位符
+ctx.registerCommand(['help'], {
+  args: [
+    { name: 'command', options: '<commands>' }  // 所有顶级命令
+  ],
+  handler: async (args) => { /* ... */ }
+});
+
+ctx.registerCommand(['players'], {
+  description: '玩家命令组',
+  args: [
+    { name: 'subcommand', options: '<subcommands>' }  // 自动获取 !players 的子命令
+  ],
+  handler: async (args) => { /* ... */ }
+});
+```
+
+当用户在 CLI 中输入命令并按下 Tab 键时，系统会自动根据参数定义提供补全建议。使用占位符时，补全列表会实时反映当前系统状态。
+
 ### 2.2 服务器交互
 
 ```javascript
@@ -359,9 +485,18 @@ export default {
       }
     });
 
-    // 注册命令：查询玩家信息
+    // 注册命令：查询玩家信息（使用 <players> 占位符提供自动补全）
     ctx.registerCommand(['players', 'info'], {
       description: '查询指定玩家的信息',
+      args: [
+        {
+          name: 'player',
+          description: '玩家名称或UUID',
+          required: true,
+          type: 'string',
+          options: '<players>'  // 使用占位符，CLI 会自动显示在线玩家列表作为候选
+        }
+      ],
       handler: async (args, context) => {
         if (args.length === 0) {
           await context.reply({ 

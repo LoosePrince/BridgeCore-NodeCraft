@@ -2,12 +2,13 @@
  * 命令注册表 - 管理所有命令的指令树
  */
 export class CommandRegistry {
-  constructor(prefix) {
+  constructor(prefix, options = {}) {
     this.prefix = prefix;
     this.commands = new Map(); // 存储所有注册的命令
     this.commandTree = {}; // 命令树结构
     this.permissionLevelStack = [1];
     this.denyMessageStack = [null];
+    this.placeholderResolvers = options.placeholderResolvers || {};
   }
 
   /**
@@ -475,8 +476,16 @@ export class CommandRegistry {
       } catch (error) {
         options = [];
       }
+    } else if (typeof options === 'string') {
+      options = this.resolvePlaceholderOptions(options, {
+        command,
+        argIndex: currentArgIndex,
+        parts,
+        rawInput,
+        hasTrailingSpace
+      });
     }
-    if (!options.length) {
+    if (!Array.isArray(options) || !options.length) {
       return [];
     }
 
@@ -496,6 +505,30 @@ export class CommandRegistry {
       : (rawInput.endsWith(' ') ? rawInput : `${rawInput} `);
 
     return filteredOptions.map(opt => `${this.prefix}${baseInput}${opt}`);
+  }
+
+  resolvePlaceholderOptions(identifier, context) {
+    if (!identifier || typeof identifier !== 'string') {
+      return [];
+    }
+    const normalized = identifier.trim().replace(/^<|>$/g, '').toLowerCase();
+    if (!normalized) {
+      return [];
+    }
+    const resolver = this.placeholderResolvers?.[normalized];
+    if (!resolver) {
+      return [];
+    }
+    try {
+      const result = resolver(context);
+      if (Array.isArray(result)) {
+        return result.filter(item => typeof item === 'string' && item.length > 0);
+      }
+      return [];
+    } catch (error) {
+      // 静默失败，避免影响补全功能
+      return [];
+    }
   }
 
   /**

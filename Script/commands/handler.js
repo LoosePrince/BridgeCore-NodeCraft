@@ -18,7 +18,166 @@ export class CommandHandler {
     this.prefix = config.commands.prefix;
     
     // 创建命令注册表
-    this.registry = new CommandRegistry(this.prefix);
+    this.registry = new CommandRegistry(this.prefix, {
+      placeholderResolvers: {
+        // 玩家相关
+        players: () => {
+          const api = this.agentManager?.getPlayerListManager?.()?.getPublicApi?.();
+          if (!api || typeof api.list !== 'function') {
+            return [];
+          }
+          try {
+            return api
+              .list()
+              .map((player) => player?.name)
+              .filter((name) => typeof name === 'string' && name.trim().length > 0);
+          } catch {
+            return [];
+          }
+        },
+        'player-uuid': () => {
+          const api = this.agentManager?.getPlayerListManager?.()?.getPublicApi?.();
+          if (!api || typeof api.list !== 'function') {
+            return [];
+          }
+          try {
+            return api
+              .list()
+              .map((player) => player?.uuid)
+              .filter((uuid) => typeof uuid === 'string' && uuid.trim().length > 0);
+          } catch {
+            return [];
+          }
+        },
+        'offline-players': () => {
+          try {
+            // 从 PlayerPresenceTracker 获取 usercache.json 中的玩家
+            const playerListManager = this.agentManager?.getPlayerListManager?.();
+            const presenceTracker = playerListManager?.fallbackSource;
+            if (!presenceTracker || !presenceTracker.userCache) {
+              return [];
+            }
+            const onlineNames = new Set();
+            const api = this.agentManager?.getPlayerListManager?.()?.getPublicApi?.();
+            if (api && typeof api.list === 'function') {
+              api.list().forEach(player => {
+                if (player?.name) {
+                  onlineNames.add(player.name.toLowerCase());
+                }
+              });
+            }
+            // 返回不在线的玩家
+            return Array.from(presenceTracker.userCache.values())
+              .map(entry => entry.name)
+              .filter((name) => {
+                if (!name || typeof name !== 'string') return false;
+                return !onlineNames.has(name.toLowerCase());
+              });
+          } catch {
+            return [];
+          }
+        },
+        // 插件管理类
+        plugins: () => {
+          const pluginManager = this.pluginManagerRef?.current;
+          if (!pluginManager) {
+            return [];
+          }
+          try {
+            return pluginManager
+              .listLoadedPlugins()
+              .map((meta) => meta?.id)
+              .filter((id) => typeof id === 'string' && id.trim().length > 0);
+          } catch {
+            return [];
+          }
+        },
+        'plugin-entries': () => {
+          const pluginManager = this.pluginManagerRef?.current;
+          if (!pluginManager) {
+            return [];
+          }
+          try {
+            return pluginManager.getAllEntries() || [];
+          } catch {
+            return [];
+          }
+        },
+        // 权限管理类
+        'permission-levels': () => {
+          return ['1', '2', '3', '4'];
+        },
+        'players-with-permission': (context) => {
+          if (!this.permissionManager) {
+            return [];
+          }
+          try {
+            // 如果上下文中有前一个参数（权限级别），则筛选该级别的玩家
+            // 否则返回所有有自定义权限的玩家
+            const parts = context?.parts || [];
+            const command = context?.command;
+            if (command && command.path && parts.length > command.path.length) {
+              // 尝试从已输入的参数中获取权限级别
+              const levelArg = parts[command.path.length];
+              const level = parseInt(levelArg, 10);
+              if (level >= 1 && level <= 4) {
+                const players = this.permissionManager.listPlayers();
+                return players
+                  .filter((p) => p.level === level)
+                  .map((p) => p.name)
+                  .filter((name) => typeof name === 'string' && name.trim().length > 0);
+              }
+            }
+            // 返回所有有自定义权限的玩家
+            const players = this.permissionManager.listPlayers();
+            return players
+              .map((p) => p.name)
+              .filter((name) => typeof name === 'string' && name.trim().length > 0);
+          } catch {
+            return [];
+          }
+        },
+        // 命令系统类
+        commands: () => {
+          try {
+            return this.registry
+              .getAllCommands()
+              .filter((cmd) => cmd.path.length === 1)
+              .map((cmd) => cmd.path[0])
+              .filter((name) => typeof name === 'string' && name.trim().length > 0);
+          } catch {
+            return [];
+          }
+        },
+        subcommands: (context) => {
+          try {
+            const command = context?.command;
+            if (!command || !command.path) {
+              return [];
+            }
+            // 获取当前命令路径的所有子命令
+            const allCommands = this.registry.getAllCommands();
+            const parentPath = command.path.map((p) => p.toLowerCase());
+            return allCommands
+              .filter((cmd) => {
+                if (cmd.path.length !== parentPath.length + 1) {
+                  return false;
+                }
+                for (let i = 0; i < parentPath.length; i++) {
+                  if (cmd.path[i].toLowerCase() !== parentPath[i]) {
+                    return false;
+                  }
+                }
+                return true;
+              })
+              .map((cmd) => cmd.path[cmd.path.length - 1])
+              .filter((name) => typeof name === 'string' && name.trim().length > 0);
+          } catch {
+            return [];
+          }
+        }
+      }
+    });
     
     // 注册所有 BCNC 系统命令
     const registerCommands = () => registerBCNCCommands(this.registry, {

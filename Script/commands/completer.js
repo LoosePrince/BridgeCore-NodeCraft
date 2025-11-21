@@ -111,6 +111,20 @@ export class CommandCompleter {
       } catch (error) {
         return false;
       }
+    } else if (typeof options === 'string') {
+      // 处理占位符（如 <players>）
+      options = this.registry.resolvePlaceholderOptions(options, {
+        command,
+        argIndex: currentArgIndex,
+        parts: inputParts,
+        rawInput: trimmedInput,
+        hasTrailingSpace
+      });
+    }
+    
+    // 确保 options 是数组
+    if (!Array.isArray(options)) {
+      return false;
     }
     
     return options.some(opt => opt.toLowerCase() === lastArg.toLowerCase());
@@ -225,7 +239,10 @@ export class CommandCompleter {
     }
     
     const lastPart = candidateParts[candidateParts.length - 1];
-    const isArgumentCompletion = matchedCommand && inputPartsCount > matchedCommand.path.length;
+    // 参数补全：如果匹配了命令，且输入词数大于等于命令路径长度（有末尾空格时等于，无末尾空格时大于）
+    const isArgumentCompletion = matchedCommand && 
+      (inputPartsCount > matchedCommand.path.length || 
+       (hasTrailingSpace && inputPartsCount === matchedCommand.path.length));
     
     // 参数补全：总是返回参数值
     if (isArgumentCompletion) {
