@@ -165,20 +165,20 @@ export class ServerManager {
           this.logger.info('EULA 已同意，正在自动重启服务器...');
           this.eulaHandled = false; // 重置标志
         } else if (this.config.autoRestart.enabled) {
-          if (maxRestarts === 0 || this.restartCount < maxRestarts) {
-            this.restartCount++;
-            this.logger.info(`${delay} 秒后自动重启服务器 (第 ${this.restartCount} 次)...`);
+        if (maxRestarts === 0 || this.restartCount < maxRestarts) {
+          this.restartCount++;
+              this.logger.info(`${delay} 秒后自动重启服务器 (第 ${this.restartCount} 次)...`);
           } else {
             this.logger.error(`已达到最大重启次数 (${maxRestarts})，停止自动重启`);
             this.eulaHandled = false; // 重置标志
             return;
           }
         }
-        
-        setTimeout(async () => {
-          await this.start();
-        }, delay * 1000);
-      } else {
+          
+          setTimeout(async () => {
+            await this.start();
+          }, delay * 1000);
+        } else {
         this.eulaHandled = false; // 重置标志
       }
     });

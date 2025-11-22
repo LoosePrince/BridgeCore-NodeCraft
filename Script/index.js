@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
 import chalk from 'chalk';
 import { loadConfig } from './config/loader.js';
+import { initializeProject } from './utils/initializer.js';
 import { Logger } from './utils/logger.js';
 import { ServerManager } from './server/manager.js';
 import { ServerEventBus } from './server/events.js';
@@ -26,6 +27,29 @@ const projectRoot = dirname(__dirname);
  * 主函数
  */
 async function main() {
+  // 初始化项目结构
+  const configCreated = initializeProject(projectRoot);
+  
+  // 如果创建了新的 config.yml，提示用户配置后重新启动
+  if (configCreated) {
+    console.log('');
+    console.log(chalk.yellow('═══════════════════════════════════════════════════════════'));
+    console.log(chalk.yellow('  检测到首次运行，已创建 config.yml 配置文件'));
+    console.log(chalk.yellow('═══════════════════════════════════════════════════════════'));
+    console.log('');
+    console.log(chalk.cyan('请完成以下配置后重新启动：'));
+    console.log(chalk.white('  1. 编辑 config.yml 文件'));
+    console.log(chalk.white('  2. 配置 server.startCommand（服务器启动命令）'));
+    console.log(chalk.white('  3. 配置 server.directory（服务器目录路径）'));
+    console.log(chalk.white('  4. 根据需要调整其他配置项'));
+    console.log('');
+    console.log(chalk.gray('配置文件位置:'), chalk.white(join(projectRoot, 'config.yml')));
+    console.log('');
+    console.log(chalk.yellow('配置完成后，请重新运行启动命令。'));
+    console.log('');
+    process.exit(0);
+  }
+  
   // 加载配置
   const config = loadConfig(projectRoot);
   const packageInfo = loadPackageInfo();
