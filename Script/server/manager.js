@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { join } from 'path';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import iconv from 'iconv-lite';
 
 /**
@@ -16,6 +17,14 @@ export class ServerManager {
     this.forceKillTimer = null;
     this.eventBus = options.eventBus || null;
     this.outputProcessor = options.outputProcessor || null;
+    this.eulaHandled = false; // 标记是否已处理 EULA
+    
+    // 监听服务器日志行，检测 EULA 提示
+    if (this.eventBus) {
+      this.eventBus.on('server:line', (context) => {
+        this.handleEulaPrompt(context.line);
+      });
+    }
   }
 
   /**
@@ -40,6 +49,9 @@ export class ServerManager {
       this.logger.warn('服务器已在运行中');
       return;
     }
+
+    // 重置 EULA 处理标志（每次启动时重置）
+    this.eulaHandled = false;
 
     const serverConfig = this.config.server;
     const serverDir = join(this.projectRoot, serverConfig.directory);
@@ -135,25 +147,39 @@ export class ServerManager {
           timestamp: Date.now()
         });
         this._isShuttingDown = false;
+        this.eulaHandled = false; // 重置 EULA 处理标志
         return;
       }
 
       this.logger.warn(`服务器进程退出 (代码: ${code}, 信号: ${signal})`);
 
-      // 自动重启逻辑
-      if (this.config.autoRestart.enabled) {
+      // 如果是因为 EULA 问题退出，自动重启
+      const shouldAutoRestart = this.eulaHandled || this.config.autoRestart.enabled;
+      
+      if (shouldAutoRestart) {
+        // 如果是因为 EULA 问题，立即重启（不等待）
+        const delay = this.eulaHandled ? 1 : this.config.autoRestart.delay;
         const maxRestarts = this.config.autoRestart.maxRestarts;
-        if (maxRestarts === 0 || this.restartCount < maxRestarts) {
-          this.restartCount++;
-          const delay = this.config.autoRestart.delay;
-              this.logger.info(`${delay} 秒后自动重启服务器 (第 ${this.restartCount} 次)...`);
-          
-          setTimeout(async () => {
-            await this.start();
-          }, delay * 1000);
-        } else {
-              this.logger.error(`已达到最大重启次数 (${maxRestarts})，停止自动重启`);
+        
+        if (this.eulaHandled) {
+          this.logger.info('EULA 已同意，正在自动重启服务器...');
+          this.eulaHandled = false; // 重置标志
+        } else if (this.config.autoRestart.enabled) {
+          if (maxRestarts === 0 || this.restartCount < maxRestarts) {
+            this.restartCount++;
+            this.logger.info(`${delay} 秒后自动重启服务器 (第 ${this.restartCount} 次)...`);
+          } else {
+            this.logger.error(`已达到最大重启次数 (${maxRestarts})，停止自动重启`);
+            this.eulaHandled = false; // 重置标志
+            return;
+          }
         }
+        
+        setTimeout(async () => {
+          await this.start();
+        }, delay * 1000);
+      } else {
+        this.eulaHandled = false; // 重置标志
       }
     });
 
@@ -227,6 +253,69 @@ export class ServerManager {
    */
   getProcessId() {
     return this.serverProcess?.pid ?? null;
+  }
+
+  /**
+   * 处理 EULA 提示
+   * @param {string} line - 日志行
+   */
+  handleEulaPrompt(line) {
+    // 检查是否包含 EULA 提示消息
+    if (this.eulaHandled) {
+      return;
+    }
+
+    const eulaPatterns = [
+      /You need to agree to the EULA in order to run the server/i,
+      /需要同意 EULA 才能运行服务器/i,
+      /eula\.txt/i
+    ];
+
+    const hasEulaPrompt = eulaPatterns.some(pattern => pattern.test(line));
+    
+    if (!hasEulaPrompt) {
+      return;
+    }
+
+    this.eulaHandled = true;
+    
+    // 获取服务器目录
+    const serverConfig = this.config.server;
+    const serverDir = join(this.projectRoot, serverConfig.directory);
+    const eulaPath = join(serverDir, 'eula.txt');
+
+    try {
+      // 检查 eula.txt 是否存在
+      if (!existsSync(eulaPath)) {
+        this.logger.warn('未找到 eula.txt 文件，将创建新文件');
+        writeFileSync(eulaPath, 'eula=true\n', 'utf8');
+        this.logger.info('已自动创建并同意 EULA');
+      } else {
+        // 读取现有文件
+        let content = readFileSync(eulaPath, 'utf8');
+        
+        // 检查是否已经是 true
+        if (/eula\s*=\s*true/i.test(content)) {
+          this.logger.info('EULA 已同意，无需修改');
+          return;
+        }
+
+        // 替换 eula=false 为 eula=true
+        content = content.replace(/eula\s*=\s*false/gi, 'eula=true');
+        
+        // 如果没有找到 eula=false，直接添加 eula=true
+        if (!/eula\s*=/i.test(content)) {
+          content = content.trim() + '\neula=true\n';
+        }
+
+        writeFileSync(eulaPath, content, 'utf8');
+        this.logger.info('已自动同意 EULA，服务器将在下次启动时继续运行');
+      }
+
+      this.logger.info('提示：EULA 已自动同意，如需重新设置请编辑 eula.txt 文件');
+    } catch (error) {
+      this.logger.error(`处理 EULA 时出错: ${error.message}`);
+    }
   }
 }
 
