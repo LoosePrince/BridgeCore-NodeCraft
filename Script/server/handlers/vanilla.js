@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { BaseServerHandler } from './base.js';
 
-const CHAT_REGEX = /^\[(?<time>.+?)\] \[(?<thread>[^\]]+)\/INFO\]: <(?<player>[^>]+)> (?<message>.+)$/;
+const CHAT_REGEX = /^\[(?<time>.+?)\] \[(?<thread>[^\]]+)\/INFO\]: (?:\[Not Secure\] )?<(?<player>[^>]+)> (?<message>.+)$/;
 const JOIN_REGEX = /^\[(?<time>.+?)\] \[(?<thread>[^\]]+)\/INFO\]: (?<player>.+) joined the game$/;
 const LEAVE_REGEX = /^\[(?<time>.+?)\] \[(?<thread>[^\]]+)\/INFO\]: (?<player>.+) left the game$/;
 const DEATH_REGEX = /^\[(?<time>.+?)\] \[(?<thread>[^\]]+)\/INFO\]: (?<message>.+)$/;
@@ -90,7 +90,7 @@ export class VanillaServerHandler extends BaseServerHandler {
         transform: (match) => ({
           player: match.groups.player.trim(),
           advancement: match.groups.advancement,
-          category: match[2],
+          category: match[4],
           time: match.groups.time
         })
       }),

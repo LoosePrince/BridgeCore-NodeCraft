@@ -37,13 +37,24 @@ function injectDateIntoMinecraftTimestamp(line) {
   if (!line || /\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/.test(line)) {
     return line;
   }
-  const match = line.match(/\[(\d{2}:\d{2}:\d{2})\]/);
-  if (!match) {
-    return line;
+  
+  // 匹配 Paper 格式: [HH:mm:ss INFO]: 或 [HH:mm:ss WARN]: 等
+  const paperMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\s+(INFO|WARN|ERROR|DEBUG)\]:/);
+  if (paperMatch) {
+    const date = formatCurrentDate();
+    const target = paperMatch[0];
+    return line.replace(target, `[${date} ${paperMatch[1]}] [${paperMatch[2]}]`);
   }
+  
+  // 匹配原版/Forge 格式: [HH:mm:ss] 或 [HH:mm:ss] [Thread/INFO]:
+  const vanillaMatch = line.match(/\[(\d{2}:\d{2}:\d{2})\]/);
+  if (vanillaMatch) {
   const date = formatCurrentDate();
-  const target = match[0];
-  return line.replace(target, `[${date} ${match[1]}]`);
+    const target = vanillaMatch[0];
+    return line.replace(target, `[${date} ${vanillaMatch[1]}]`);
+  }
+  
+  return line;
 }
 
 /**
@@ -76,6 +87,7 @@ export class Logger {
   constructor(config, projectRoot) {
     this.projectRoot = projectRoot;
     this.logStream = null;
+    this.debugLogStream = null;
     this.config = null;
     this.subscribers = new Set();
     this.applyConfig(config.logging);
@@ -113,7 +125,25 @@ export class Logger {
       this.logStream = null;
     }
 
+    // 关闭并重新创建 debug.log（每次启动覆盖）
+    if (this.debugLogStream) {
+      this.debugLogStream.end();
+      this.debugLogStream = null;
+    }
+
     this.config = loggingConfig;
+
+    // 创建 debug.log 文件（每次启动覆盖，包含所有日志）
+    const debugLogPath = join(this.projectRoot, 'logs', 'debug.log');
+    this.ensureLogDirectory(debugLogPath);
+    try {
+      this.debugLogStream = createWriteStream(debugLogPath, { flags: 'w' });
+      this.debugLogStream.on('error', (error) => {
+        this.error(`[日志] 写入 debug.log 失败: ${error.message}`);
+      });
+    } catch (error) {
+      this.error(`[日志] 创建 debug.log 失败: ${error.message}`);
+    }
 
     if (this.config.saveToFile) {
       const originalLogPath = join(this.projectRoot, this.config.logFile);
@@ -204,10 +234,7 @@ export class Logger {
 
   write(level, message) {
     const normalizedLevel = level.toLowerCase();
-    if (!this.shouldLog(normalizedLevel)) {
-      return;
-    }
-
+    
     const timestamp = this.config.showTimestamp ? `[${formatTimestamp()}] ` : '';
     const prefix = {
       'debug': chalk.gray('DEBUG'),
@@ -217,17 +244,27 @@ export class Logger {
     }[normalizedLevel] || chalk.blue('INFO');
 
     const output = `${timestamp}[${prefix}] ${message}`;
+    const plainOutput = output.replace(/\u001b\[[0-9;]*m/g, '');
+    
+    // 写入 debug.log（包含所有日志，不受日志级别限制）
+    if (this.debugLogStream) {
+      this.debugLogStream.write(plainOutput + '\n');
+    }
+    
+    // 检查是否应该输出该级别日志（控制台和普通日志文件）
+    if (!this.shouldLog(normalizedLevel)) {
+      return;
+    }
     
     if (this.config.consoleOutput) {
       if (this.config.coloredOutput) {
         console.log(output);
       } else {
-        console.log(output.replace(/\u001b\[[0-9;]*m/g, ''));
+        console.log(plainOutput);
       }
     }
 
     if (this.logStream) {
-      const plainOutput = output.replace(/\u001b\[[0-9;]*m/g, '');
       this.logStream.write(plainOutput + '\n');
     }
 
@@ -312,6 +349,11 @@ export class Logger {
     if (this.logStream) {
       this.logStream.write(`[SERVER] ${normalizedLine}\n`);
     }
+
+    // 写入 debug.log（包含所有服务器输出）
+    if (this.debugLogStream) {
+      this.debugLogStream.write(`[SERVER] ${normalizedLine}\n`);
+    }
   }
 
   /**
@@ -320,6 +362,9 @@ export class Logger {
   close() {
     if (this.logStream) {
       this.logStream.end();
+    }
+    if (this.debugLogStream) {
+      this.debugLogStream.end();
     }
   }
 }

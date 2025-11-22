@@ -90,7 +90,7 @@ export class PaperServerHandler extends BaseServerHandler {
         transform: (match) => ({
           player: match.groups.player.trim(),
           advancement: match.groups.advancement,
-          category: match[2],
+          category: match[3],
           time: match.groups.time
         })
       }),

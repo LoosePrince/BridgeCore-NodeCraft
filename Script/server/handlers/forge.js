@@ -3,7 +3,7 @@ import { BaseServerHandler } from './base.js';
 
 const PREFIX = '^\\[(?<time>.+?)\\] \\[(?<thread>[^\\]/]+)\\/(?<level>[A-Z]+)\\](?: \\[(?<logger>[^\\]]+)\\])?: ';
 
-const CHAT_REGEX = new RegExp(`${PREFIX}<(?<player>[^>]+)> (?<message>.+)$`);
+const CHAT_REGEX = new RegExp(`${PREFIX}(?:\\[Not Secure\\] )?<(?<player>[^>]+)> (?<message>.+)$`);
 const JOIN_REGEX = new RegExp(`${PREFIX}(?<player>.+) joined the game$`);
 const LEAVE_REGEX = new RegExp(`${PREFIX}(?<player>.+) left the game$`);
 const DEATH_REGEX = new RegExp(`${PREFIX}(?<message>.+)$`);
